@@ -52,68 +52,39 @@ class ConvertToMultiChannelBasedOnBratsClassesd(transforms.MapTransform):
 
 def get_scratch_train_transforms(args):
     if args.dataset == 'btcv':
-        # Try to use ITKReader for .mhd files
-        try:
-            import SimpleITK
-            from monai.data import ITKReader
-            reader = ITKReader()
-            load_transform = transforms.LoadImaged(keys=["image", "label"], reader=reader)
-        except (ImportError, AttributeError) as e:
-            raise RuntimeError(
-                "Cannot read .mhd files. Please install SimpleITK: pip install SimpleITK"
-            ) from e
-        
+        # For 2D training with proper 2D transforms
         train_transform = transforms.Compose(
             [
-                load_transform,
+                transforms.LoadImaged(keys=["image", "label"]),
                 transforms.AddChanneld(keys=["image", "label"]),
-                # Convert 2D images to 3D by replicating along depth dimension
-                transforms.Lambdad(
-                    keys=["image", "label"],
-                    func=lambda x: _convert_2d_to_3d(x, patch_size=args.patch_size),
-                ),
-                transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
-                # For 2D images converted to 3D, use spacing with depth matching patch_size
-                transforms.Spacingd(keys=["image", "label"],
-                                    pixdim=(args.space_x, args.space_y, 1.0),  # Depth spacing=1.0
-                                    mode=("bilinear", "nearest")),
                 transforms.ScaleIntensityRanged(keys=["image"],
-                                                a_min=args.a_min,
-                                                a_max=args.a_max,
-                                                b_min=args.b_min,
-                                                b_max=args.b_max,
+                                                a_min=0.0,
+                                                a_max=255.0,
+                                                b_min=0.0,
+                                                b_max=1.0,
                                                 clip=True),
-                transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
-                transforms.RandCropByPosNegLabeld(
-                    keys=["image", "label"],
-                    label_key="label",
-                    spatial_size=(args.roi_x, args.roi_y, args.roi_z),  # Should be (96, 96, 16)
-                    pos=1,
-                    neg=1,
-                    num_samples=args.num_samples,
-                    image_key="image",
-                    image_threshold=0,
-                ),
+                # Resize to input size for 2D
+                transforms.Resized(keys=["image", "label"],
+                                  spatial_size=(224, 224),
+                                  mode=("bilinear", "nearest")),
+                # Apply 2D augmentations only (axes 0 and 1)
                 transforms.RandFlipd(keys=["image", "label"],
-                                    prob=args.RandFlipd_prob,
+                                    prob=0.2,
                                     spatial_axis=0),
                 transforms.RandFlipd(keys=["image", "label"],
-                                    prob=args.RandFlipd_prob,
+                                    prob=0.2,
                                     spatial_axis=1),
-                transforms.RandFlipd(keys=["image", "label"],
-                                    prob=args.RandFlipd_prob,
-                                    spatial_axis=2),
                 transforms.RandRotate90d(
                     keys=["image", "label"],
-                    prob=args.RandRotate90d_prob,
-                    max_k=3,
+                    prob=0.2,
+                    spatial_axes=(0, 1),
                 ),
                 transforms.RandScaleIntensityd(keys="image",
                                             factors=0.1,
-                                            prob=args.RandScaleIntensityd_prob),
+                                            prob=0.1),
                 transforms.RandShiftIntensityd(keys="image",
                                             offsets=0.1,
-                                            prob=args.RandShiftIntensityd_prob),
+                                            prob=0.1),
                 # Use SafeToTensord to handle negative strides from RandFlipd
                 SafeToTensord(keys=["image", "label"]),
             ]
@@ -157,81 +128,38 @@ def get_scratch_train_transforms(args):
         raise ValueError(f"Only support BTCV transforms for medical images")
     return train_transform
 
-def _convert_2d_to_3d(x, patch_size=16):
-    """Convert 2D array (C, H, W) to 3D by replicating along depth dimension.
-    MONAI uses channel-first format: (C, H, W) -> (C, H, W, D)
-    Replicates to patch_size for minimum depth needed for patchification.
-    Creates a contiguous copy to avoid negative stride issues."""
-    arr = np.asarray(x).copy()  # Ensure contiguous array with positive strides
-    if arr.ndim == 3:
-        # MONAI format: (C, H, W) -> (C, H, W, D)
-        # Replicate along depth dimension (axis 3) to match patch_size
-        depth = patch_size  # Use 16 - cuDNN fix is in main.py
-        arr = np.expand_dims(arr, axis=3)  # (C, H, W, 1)
-        arr = np.repeat(arr, depth, axis=3)  # (C, H, W, depth)
-        # Ensure shape is correct: (C, H, W, D) where D=patch_size
-        assert arr.shape[3] == depth, f"Depth dimension mismatch: expected {depth}, got {arr.shape[3]}"
-    return arr
+# _convert_2d_to_3d function removed - not needed for 2D MAE training
 
 
 def get_mae_pretrain_transforms(args):
     if args.dataset == 'btcv':
-        # Try to use ITKReader for .mhd files
-        try:
-            import SimpleITK
-            from monai.data import ITKReader
-            # Explicitly create and use ITKReader for .mhd files
-            reader = ITKReader()
-            load_transform = transforms.LoadImaged(keys=["image", "label"], reader=reader)
-        except (ImportError, AttributeError) as e:
-            # If ITKReader not available, raise error with helpful message
-            raise RuntimeError(
-                "Cannot read .mhd files. Please install SimpleITK: pip install SimpleITK"
-            ) from e
-        
+        # For 2D MAE pre-training on brain tumor images
         train_transform = transforms.Compose(
             [
-                load_transform,
+                transforms.LoadImaged(keys=["image", "label"]),
                 transforms.AddChanneld(keys=["image", "label"]),
-                # Convert 2D images to 3D by replicating along depth dimension
-                # Replicate to match patch_size (16) for MAE3D patchification
-                # After AddChanneld, 2D image is (1, H, W), replicate to (1, patch_size, H, W)
-                transforms.Lambdad(
-                    keys=["image", "label"],
-                    func=lambda x: _convert_2d_to_3d(x, patch_size=args.patch_size),
-                ),
-                transforms.Orientationd(keys=["image", "label"],
-                                        axcodes="RAS"),
-                # For 2D images converted to 3D, use spacing with depth matching patch_size
-                transforms.Spacingd(keys=["image", "label"],
-                                    pixdim=(args.space_x, args.space_y, 1.0),  # Depth spacing=1.0
-                                    mode=("bilinear", "nearest")),
                 transforms.ScaleIntensityRanged(keys=["image"],
-                                                a_min=args.a_min,
-                                                a_max=args.a_max,
-                                                b_min=args.b_min,
-                                                b_max=args.b_max,
+                                                a_min=0.0,
+                                                a_max=255.0,
+                                                b_min=0.0,
+                                                b_max=1.0,
                                                 clip=True),
-                transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
-                # For MAE pre-training, use simple random crop instead of label-based crop
-                # For 2D images converted to 3D, use ROI with depth matching patch_size
-                # Use single sample per image to reduce memory usage
-                transforms.RandSpatialCropSamplesd(
-                    keys=["image", "label"],
-                    roi_size=(args.roi_x, args.roi_y, args.patch_size),  # Depth=patch_size (16)
-                    num_samples=args.num_samples,  # Restored original (4)
-                    random_center=True,
-                    random_size=False,
-                ),
+                # Resize to 224x224 for 2D MAE
+                transforms.Resized(keys=["image", "label"],
+                                  spatial_size=(224, 224),
+                                  mode=("bilinear", "nearest")),
+                # Apply 2D augmentations only (axes 0 and 1)
                 transforms.RandFlipd(keys=["image", "label"],
-                                    prob=args.RandFlipd_prob,
+                                    prob=0.2,
                                     spatial_axis=0),
                 transforms.RandFlipd(keys=["image", "label"],
-                                    prob=args.RandFlipd_prob,
+                                    prob=0.2,
                                     spatial_axis=1),
-                transforms.RandFlipd(keys=["image", "label"],
-                                    prob=args.RandFlipd_prob,
-                                    spatial_axis=2),
+                transforms.RandRotate90d(
+                    keys=["image", "label"],
+                    prob=0.2,
+                    spatial_axes=(0, 1),  # Only rotate in 2D plane
+                ),
                 # Use SafeToTensord to handle negative strides from RandFlipd
                 SafeToTensord(keys=["image", "label"]),
             ]
@@ -309,36 +237,21 @@ def get_val_transforms(args):
 
 def get_vis_transforms(args):
     if args.dataset == 'btcv':
+        # For 2D visualization
         val_transform = transforms.Compose(
             [
                 transforms.LoadImaged(keys=["image", "label"]),
                 transforms.AddChanneld(keys=["image", "label"]),
-                transforms.Orientationd(keys=["image", "label"],
-                                        axcodes="RAS"),
-                transforms.Spacingd(keys=["image", "label"],
-                                    pixdim=(args.space_x, args.space_y, args.space_z),
-                                    mode=("bilinear", "nearest")),
                 transforms.ScaleIntensityRanged(keys=["image"],
-                                                a_min=args.a_min,
-                                                a_max=args.a_max,
-                                                b_min=args.b_min,
-                                                b_max=args.b_max,
+                                                a_min=0.0,
+                                                a_max=255.0,
+                                                b_min=0.0,
+                                                b_max=1.0,
                                                 clip=True),
-                transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
-                # transforms.RandCropByPosNegLabeld(
-                #     keys=["image", "label"],
-                #     label_key="label",
-                #     spatial_size=(args.roi_x, args.roi_y, args.roi_x),
-                #     pos=1,
-                #     neg=1,
-                #     num_samples=1,
-                #     image_key="image",
-                #     image_threshold=0,
-                # ),
-                transforms.CenterSpatialCropd(
-                    keys=["image", "label"],
-                    roi_size=(args.roi_x, args.roi_y, args.roi_z)
-                ),
+                # Resize to 224x224 for 2D MAE visualization
+                transforms.Resized(keys=["image", "label"],
+                                  spatial_size=(224, 224),
+                                  mode=("bilinear", "nearest")),
                 transforms.ToTensord(keys=["image", "label"]),
             ]
         )

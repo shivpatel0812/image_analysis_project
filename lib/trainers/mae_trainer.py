@@ -96,50 +96,25 @@ class MAETrainer(BaseTrainer):
         if self.dataloader is None:
             print("=> creating dataloader")
             args = self.args
-            augmentation = self.get_mae_train_augmentation()
 
-            train_dataset = ImageListDataset(
-                data_root=args.data_path,
-                listfile=args.tr_listfile,
-                transform=transforms.Compose(augmentation),
-                nolabel=True)
+            # Use MONAI dataset loaders
+            from lib.data.med_transforms import get_mae_pretrain_transforms, get_vis_transforms
+            from lib.data.med_datasets import get_train_loader
 
-            if args.distributed:
-                train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-            else:
-                train_sampler = None
-
-            self.dataloader = torch.utils.data.DataLoader(train_dataset, 
-                                                        batch_size=self.batch_size, 
-                                                        shuffle=(train_sampler is None),
-                                                        num_workers=self.workers, 
-                                                        pin_memory=True, 
-                                                        sampler=train_sampler, 
-                                                        drop_last=True)
+            train_transform = get_mae_pretrain_transforms(args)
+            self.dataloader = get_train_loader(args,
+                                                batch_size=self.batch_size,
+                                                workers=self.workers,
+                                                train_transform=train_transform)
             self.iters_per_epoch = len(self.dataloader)
 
             # for visualization, we also build a validation dataloader
-            val_augmentation = self.get_mae_val_augmentation()
-            
-            val_dataset = ImageListDataset(
-                data_root=args.data_path,
-                listfile=args.va_listfile,
-                transform=transforms.Compose(val_augmentation),
-                nolabel=True)
-            
-            # if args.distributed:
-            #     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-            # else:
-            #     val_sampler = None
-
-            # # # val_sampler = None
-            self.val_dataloader = torch.utils.data.DataLoader(val_dataset, 
-                                                        batch_size=args.vis_batch_size, 
-                                                        shuffle=True,
-                                                        num_workers=4, 
-                                                        pin_memory=True, 
-                                                        # sampler=val_sampler,
-                                                        drop_last=True)
+            vis_transform = get_vis_transforms(args)
+            from lib.data.med_datasets import get_val_loader
+            self.val_dataloader = get_val_loader(args,
+                                                  batch_size=args.vis_batch_size,
+                                                  workers=4,
+                                                  val_transform=vis_transform)
         else:
             raise ValueError(f"Dataloader has been created. Do not create twice.")
 
@@ -203,7 +178,10 @@ class MAETrainer(BaseTrainer):
         # switch to train mode
         model.train()
 
-        for i, image in enumerate(train_loader):
+        for i, batch_data in enumerate(train_loader):
+            # Extract image from MONAI batch dictionary
+            image = batch_data['image']
+
             # adjust learning at the beginning of each iteration
             self.adjust_learning_rate(epoch + i / self.iters_per_epoch, args)
 
@@ -247,9 +225,12 @@ class MAETrainer(BaseTrainer):
 
         model.eval()
 
-        for i, image in enumerate(loader):
+        for i, batch_data in enumerate(loader):
             if i > 0:
                 break
+            # Extract image from MONAI batch dictionary
+            image = batch_data['image']
+
             if args.gpu is not None:
                 image = image.cuda(args.gpu, non_blocking=True)
 
