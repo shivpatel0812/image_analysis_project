@@ -901,6 +901,9 @@ class SegTrainer(BaseTrainer):
 
     def resume(self):
         args = self.args
+        print(f"=> Resume called with args.resume = '{args.resume}'")
+        print(f"=> Current args.start_epoch = {args.start_epoch}")
+        
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             if args.gpu is None:
@@ -909,14 +912,25 @@ class SegTrainer(BaseTrainer):
                 # Map model to be loaded to specified single gpu.
                 loc = 'cuda:{}'.format(args.gpu)
                 checkpoint = torch.load(args.resume, map_location=loc)
-            args.start_epoch = checkpoint['epoch']
+            
+            if 'epoch' not in checkpoint:
+                print(f"=> WARNING: Checkpoint does not contain 'epoch' key!")
+                print(f"=> Available keys: {list(checkpoint.keys())}")
+                print(f"=> Training will start from epoch {args.start_epoch}")
+            else:
+                old_start_epoch = args.start_epoch
+                args.start_epoch = checkpoint['epoch']
+                print(f"=> Updated args.start_epoch: {old_start_epoch} -> {args.start_epoch}")
+            
             self.model.load_state_dict(checkpoint['state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.scaler.load_state_dict(checkpoint['scaler']) # additional line compared with base imple
             print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+                  .format(args.resume, checkpoint.get('epoch', 'UNKNOWN')))
+            print(f"=> Training will resume from epoch {args.start_epoch}")
         else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+            print("=> ERROR: no checkpoint found at '{}'".format(args.resume))
+            print(f"=> Training will start from epoch {args.start_epoch}")
 
 
     def adjust_learning_rate(self, epoch, args):

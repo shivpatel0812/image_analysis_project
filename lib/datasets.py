@@ -8,11 +8,33 @@ from torchvision.datasets import VisionDataset
 
 from tqdm import tqdm
 
+try:
+    import SimpleITK as sitk
+    HAS_SITK = True
+except ImportError:
+    HAS_SITK = False
+
+
+def load_medical_image(path):
+    if path.endswith('.mhd') or path.endswith('.nii') or path.endswith('.nii.gz'):
+        if not HAS_SITK:
+            raise RuntimeError("SimpleITK required for .mhd files: pip install SimpleITK")
+        img = sitk.ReadImage(path)
+        arr = sitk.GetArrayFromImage(img).astype(np.float32)
+        if arr.ndim == 3:
+            arr = arr[arr.shape[0] // 2]
+        arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
+        return Image.fromarray(arr.astype(np.uint8))
+    else:
+        return Image.open(path)
+
+
 class ImageListDataset(VisionDataset):
     def __init__(self, data_root, listfile, transform, gray=False, nolabel=False, multiclass=False):
         self.image_list = []
         self.label_list = []
         self.nolabel = nolabel
+        self.data_root = data_root
         with open(listfile) as f:
             lines = f.readlines()
             for line in lines:
@@ -22,7 +44,6 @@ class ImageListDataset(VisionDataset):
                     if not multiclass:
                         label = int(items[1])
                     elif multiclass:
-                        # label = torch.tensor(list(map(int, items[1:])), dtype=torch.float64)
                         label = list(map(float, items[1:]))
                     else:
                         raise ValueError("Line format is not right")
@@ -37,7 +58,13 @@ class ImageListDataset(VisionDataset):
         return len(self.image_list)
 
     def __getitem__(self, index):
-        image = Image.open(self.image_list[index])
+        img_path = self.image_list[index]
+        
+        if img_path.endswith('.mhd') or img_path.endswith('.nii') or img_path.endswith('.nii.gz'):
+            image = load_medical_image(img_path)
+        else:
+            image = Image.open(img_path)
+        
         if self.gray:
             image = image.convert('L')
         else:
@@ -49,30 +76,3 @@ class ImageListDataset(VisionDataset):
             return image, torch.tensor(label)
         else:
             return image
-
-# if __name__ == "__main__":
-#     from loader import *
-#     augmentation = transforms.Compose([
-#         transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
-#         transforms.RandomApply([
-#             transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
-#         ], p=0.8),
-#         transforms.RandomGrayscale(p=0.2),
-#         transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.5),
-#         transforms.RandomHorizontalFlip(),
-#         transforms.ToTensor(),
-#         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-#     ])
-
-#     dataset = ImageThumbnailDataset(
-#         data_root="/data/add_disk0/leizhou/imagenet100/images",
-#         listfile="/nfs/bigcornea/add_disk0/leizhou/imagenet100/val_list.txt",
-#         transform=augmentation,
-#         thumbnail_size=32,
-#         n_M=1,
-#         n_E=4,
-#         nolabel=True)
-
-#     for images, thumbnail in dataset:
-#         import pdb
-#         pdb.set_trace()

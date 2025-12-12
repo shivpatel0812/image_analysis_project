@@ -8,11 +8,9 @@ import torchvision.transforms as transforms
 import sys
 sys.path.append('..')
 
-import models
-import networks
-from utils import get_conf
-from datasets import ImageListDataset
-import data_preprocessing
+import lib.models as models
+import lib.networks as networks
+from lib.datasets import ImageListDataset
 
 import wandb
 
@@ -46,11 +44,8 @@ class MAETrainer(BaseTrainer):
                 "Model is not created and wrapped yet. Please create model first."
         print("=> creating optimizer")
         args = self.args
-        # model = self.wrapped_model
 
         optim_params = self.get_parameter_groups()
-        # optim_params = self.group_params(model)
-        # TODO: create optimizer factory
         self.optimizer = torch.optim.AdamW(optim_params, 
                                             lr=args.lr,
                                             betas=(args.beta1, args.beta2),
@@ -58,7 +53,11 @@ class MAETrainer(BaseTrainer):
 
     def get_mae_train_augmentation(self):
         args = self.args
-        if args.mean_std_type == 'IMN':
+        in_chans = getattr(args, 'in_chans', 3)
+        
+        if in_chans == 1:
+            normalize = transforms.Normalize(mean=[0.5], std=[0.225])
+        elif args.mean_std_type == 'IMN':
             normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
         elif args.mean_std_type == 'MED':
@@ -66,6 +65,7 @@ class MAETrainer(BaseTrainer):
                                      std=[0.225, 0.225, 0.225])
         else:
             raise ValueError(f"Unsuported mean_std_type {args.mean_std_type}")
+        
         augmentation = [
                 transforms.RandomResizedCrop(args.input_size, scale=(args.crop_min, 1.)),
                 transforms.RandomHorizontalFlip(),
@@ -76,7 +76,11 @@ class MAETrainer(BaseTrainer):
 
     def get_mae_val_augmentation(self):
         args = self.args
-        if args.mean_std_type == 'IMN':
+        in_chans = getattr(args, 'in_chans', 3)
+        
+        if in_chans == 1:
+            normalize = transforms.Normalize(mean=[0.5], std=[0.225])
+        elif args.mean_std_type == 'IMN':
             normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
         elif args.mean_std_type == 'MED':
@@ -84,6 +88,7 @@ class MAETrainer(BaseTrainer):
                                      std=[0.225, 0.225, 0.225])
         else:
             raise ValueError(f"Unsuported mean_std_type {args.mean_std_type}")
+        
         augmentation = [
                 transforms.Resize(int(1.15 * args.input_size)),
                 transforms.CenterCrop(args.input_size),
@@ -97,11 +102,13 @@ class MAETrainer(BaseTrainer):
             print("=> creating dataloader")
             args = self.args
             augmentation = self.get_mae_train_augmentation()
+            in_chans = getattr(args, 'in_chans', 3)
 
             train_dataset = ImageListDataset(
                 data_root=args.data_path,
                 listfile=args.tr_listfile,
                 transform=transforms.Compose(augmentation),
+                gray=(in_chans == 1),
                 nolabel=True)
 
             if args.distributed:
@@ -118,46 +125,32 @@ class MAETrainer(BaseTrainer):
                                                         drop_last=True)
             self.iters_per_epoch = len(self.dataloader)
 
-            # for visualization, we also build a validation dataloader
             val_augmentation = self.get_mae_val_augmentation()
             
             val_dataset = ImageListDataset(
                 data_root=args.data_path,
                 listfile=args.va_listfile,
                 transform=transforms.Compose(val_augmentation),
+                gray=(in_chans == 1),
                 nolabel=True)
-            
-            # if args.distributed:
-            #     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-            # else:
-            #     val_sampler = None
 
-            # # # val_sampler = None
             self.val_dataloader = torch.utils.data.DataLoader(val_dataset, 
                                                         batch_size=args.vis_batch_size, 
                                                         shuffle=True,
                                                         num_workers=4, 
                                                         pin_memory=True, 
-                                                        # sampler=val_sampler,
                                                         drop_last=True)
         else:
             raise ValueError(f"Dataloader has been created. Do not create twice.")
 
     def run(self):
         args = self.args
-        # Compute iterations when resuming
         niters = args.start_epoch * self.iters_per_epoch
 
         for epoch in range(args.start_epoch, args.epochs):
             if args.distributed:
                 self.dataloader.sampler.set_epoch(epoch)
 
-            # if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank == 0):
-            #     if epoch == args.start_epoch:
-            #         print("==> First visualization")
-            #         self.vis_reconstruction(niters)
-
-            # train for one epoch
             niters = self.epoch_train(epoch, niters)
 
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank == 0):
@@ -171,13 +164,10 @@ class MAETrainer(BaseTrainer):
                         'arch': args.arch,
                         'state_dict': self.model.state_dict(),
                         'optimizer' : self.optimizer.state_dict(),
-                        'scaler': self.scaler.state_dict(), # additional line compared with base imple
+                        'scaler': self.scaler.state_dict(),
                     }, is_best=False, filename=f'{args.ckpt_dir}/checkpoint_{epoch:04d}.pth.tar')
 
     def patches2image(self, patches, color_chans=3, n_group=3):
-        """
-        input patches is in shape of [B, L, C*H*W]
-        """
         B, L, C = patches.shape
         grid_size = int(math.sqrt(L))
         patch_size = int(math.sqrt(C // color_chans))
@@ -200,27 +190,22 @@ class MAETrainer(BaseTrainer):
         optimizer = self.optimizer
         scaler = self.scaler
 
-        # switch to train mode
         model.train()
 
         for i, image in enumerate(train_loader):
-            # adjust learning at the beginning of each iteration
             self.adjust_learning_rate(epoch + i / self.iters_per_epoch, args)
 
             if args.gpu is not None:
                 image = image.cuda(args.gpu, non_blocking=True)
 
-            # compute output and loss
             with torch.cuda.amp.autocast(True):
                 loss = model(image, return_image=False)
 
-            # compute gradient and do SGD step
             optimizer.zero_grad()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            # Log to the screen
             if i % args.print_freq == 0:
                 print(f"Epoch: {epoch:03d}/{args.epochs} | "
                       f"Iter: {i:05d}/{self.iters_per_epoch} | "
@@ -228,7 +213,7 @@ class MAETrainer(BaseTrainer):
                       f"Init Lr: {self.lr:.05f} | "
                       f"Lr: {optimizer.param_groups[0]['lr']:.05f} | "
                       f"Loss: {loss.item():.03f}")
-                if args.rank == 0:
+                if args.rank == 0 and not getattr(args, 'disable_wandb', False):
                     wandb.log(
                         {
                         "lr": optimizer.param_groups[0]['lr'],
@@ -253,12 +238,10 @@ class MAETrainer(BaseTrainer):
             if args.gpu is not None:
                 image = image.cuda(args.gpu, non_blocking=True)
 
-            # compute output and loss
             _, x, recon, masked_x = model(image, return_image=True)
 
             vis_tensor = torch.cat([x, masked_x, recon], dim=0)
 
-            # visualize
             vis_grid = self.patches2image(vis_tensor, color_chans=args.in_chans)
 
             print("wandb logging")
@@ -280,13 +263,12 @@ class MAETrainer(BaseTrainer):
             if args.gpu is None:
                 checkpoint = torch.load(args.resume)
             else:
-                # Map model to be loaded to specified single gpu.
                 loc = 'cuda:{}'.format(args.gpu)
                 checkpoint = torch.load(args.resume, map_location=loc)
             args.start_epoch = checkpoint['epoch']
             self.model.load_state_dict(checkpoint['state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer'])
-            self.scaler.load_state_dict(checkpoint['scaler']) # additional line compared with base imple
+            self.scaler.load_state_dict(checkpoint['scaler'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:

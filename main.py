@@ -79,8 +79,12 @@ def main_worker(gpu, args):
     # create optimizer
     trainer.build_optimizer()
     # resume training
-    if args.resume:
+    if args.resume and args.resume.strip():
+        print(f"=> Resume flag is set: {args.resume}")
         trainer.resume()
+    else:
+        print(f"=> No resume checkpoint specified (args.resume = {args.resume})")
+        print(f"=> Training will start from epoch {args.start_epoch}")
     trainer.build_dataloader()
 
     trainer.run()
