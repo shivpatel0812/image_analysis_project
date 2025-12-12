@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from lib.networks.patch_embed_layers import PatchEmbed2D
-
-from networks import build_2d_sincos_position_embedding
+from lib.networks.mae_vit import build_2d_sincos_position_embedding
 from timm.models.layers import trunc_normal_
 
 import math
@@ -134,6 +133,8 @@ class MAE(nn.Module):
         args = self.args
         batch_size = x.size(0)
         in_chans = x.size(1)
+        if in_chans != args.in_chans:
+            raise ValueError(f"Channel mismatch: image has {in_chans} channels but model expects {args.in_chans}. Image shape: {x.shape}")
         assert in_chans == args.in_chans
         out_chans = in_chans * args.patch_size ** 2
         assert x.size(2) == x.size(3) == args.patch_size * self.grid_size, "Unmatched patch size and grid size"

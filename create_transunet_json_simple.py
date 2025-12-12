@@ -10,13 +10,11 @@ import glob
 from pathlib import Path
 
 def create_transunet_json_simple(data_path, output_file='transunet.json'):
-    """
-    Create transunet.json file using ALL images.
-    For MAE pre-training, labels aren't actually used, so we use placeholder labels.
-    """
+ 
+ 
     data_path = Path(data_path)
     
-    # Find image directory
+
     possible_image_dirs = [
         data_path / 'averaged-training-images',
         data_path / 'averaged-training-images ',
@@ -30,7 +28,7 @@ def create_transunet_json_simple(data_path, output_file='transunet.json'):
             image_dir = img_dir
             break
     
-    # Auto-detect if not found
+
     if image_dir is None:
         for item in data_path.iterdir():
             if item.is_dir() and ('image' in item.name.lower() or 'img' in item.name.lower()):
@@ -44,7 +42,7 @@ def create_transunet_json_simple(data_path, output_file='transunet.json'):
     
     print(f"Found image directory: {image_dir}")
     
-    # Find all image files
+
     image_files = sorted(glob.glob(str(image_dir / '*.nii.gz')) + 
                         glob.glob(str(image_dir / '*.nii')))
     
@@ -54,26 +52,25 @@ def create_transunet_json_simple(data_path, output_file='transunet.json'):
     
     print(f"Found {len(image_files)} image files")
     
-    # Create training list - use same image as label (dummy, since MAE doesn't use labels)
+   
     training_list = []
     
     for img_file in image_files:
         img_rel = os.path.relpath(img_file, data_path)
         
-        # For MAE pre-training, labels aren't used, so we can use the same image
-        # or create a placeholder. Using same image is simplest.
+       
         training_list.append({
             "image": img_rel,
-            "label": img_rel  # Same file as label (won't be used by MAE)
+            "label": img_rel  
         })
     
-    # Create JSON structure
+    
     json_data = {
         "training": training_list,
         "validation": []
     }
     
-    # Save JSON file
+
     output_path = data_path / output_file
     with open(output_path, 'w') as f:
         json.dump(json_data, f, indent=2)

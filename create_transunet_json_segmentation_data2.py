@@ -19,11 +19,11 @@ def create_transunet_json_segmentation_data2(data_path, output_file='transunet.j
     """
     data_path = Path(data_path)
     
-    # Find image and label directories
+   
     image_dir = data_path / 'Segmentation_data 2' / 'Training' / 'Brains'
     label_dir = data_path / 'Segmentation_data 2' / 'Training' / 'Labels'
     
-    # Check if directories exist
+
     if not image_dir.exists():
         print(f"ERROR: Image directory not found: {image_dir}")
         return False
@@ -35,7 +35,7 @@ def create_transunet_json_segmentation_data2(data_path, output_file='transunet.j
     print(f"Found image directory: {image_dir}")
     print(f"Found label directory: {label_dir}")
     
-    # Find all .mhd image files (ignore .raw files)
+
     image_files = sorted(glob.glob(str(image_dir / '*.mhd')))
     
     if not image_files:
@@ -44,25 +44,25 @@ def create_transunet_json_segmentation_data2(data_path, output_file='transunet.j
     
     print(f"Found {len(image_files)} image files")
     
-    # Create training list
+
     training_list = []
     
     for img_file in image_files:
         img_path = Path(img_file)
-        # Extract number from filename (e.g., mri_123.mhd -> 123)
-        img_name = img_path.stem  # e.g., "mri_123"
+  
+        img_name = img_path.stem  
         
-        # Extract the number part
+     
         if img_name.startswith('mri_'):
             number = img_name.replace('mri_', '')
-            # Find corresponding label file
+     
             label_file = label_dir / f"seg_{number}.mhd"
             
             if not label_file.exists():
                 print(f"WARNING: No label found for {img_path.name}, skipping...")
                 continue
             
-            # Get relative paths from data_path
+     
             img_rel = os.path.relpath(img_file, data_path)
             label_rel = os.path.relpath(str(label_file), data_path)
             
@@ -78,10 +78,10 @@ def create_transunet_json_segmentation_data2(data_path, output_file='transunet.j
         print("ERROR: No matching image-label pairs found!")
         return False
     
-    # Create JSON structure (MONAI decathlon format)
+
     json_data = {
         "training": training_list,
-        "validation": []  # Empty for now, can be filled later
+        "validation": [] 
     }
     
     # Save JSON file

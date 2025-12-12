@@ -192,14 +192,18 @@ class MAETrainer(BaseTrainer):
 
         model.train()
 
-        for i, image in enumerate(train_loader):
-            self.adjust_learning_rate(epoch + i / self.iters_per_epoch, args)
+            for i, image in enumerate(train_loader):
+                self.adjust_learning_rate(epoch + i / self.iters_per_epoch, args)
 
-            if args.gpu is not None:
-                image = image.cuda(args.gpu, non_blocking=True)
+                if args.gpu is not None:
+                    image = image.cuda(args.gpu, non_blocking=True)
+                
+                # Debug: check image shape
+                if i == 0 and epoch == 0:
+                    print(f"DEBUG: Image shape: {image.shape}, expected channels: {args.in_chans}")
 
-            with torch.cuda.amp.autocast(True):
-                loss = model(image, return_image=False)
+                with torch.cuda.amp.autocast(True):
+                    loss = model(image, return_image=False)
 
             optimizer.zero_grad()
             scaler.scale(loss).backward()

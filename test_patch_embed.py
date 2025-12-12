@@ -7,10 +7,10 @@ import sys
 import os
 import numpy as np
 
-# Add lib to path
+
 sys.path.append('lib')
 
-# Try to import, but handle missing dependencies gracefully
+
 try:
     from lib.networks.patch_embed_layers import PatchEmbed3D
     from timm.models.layers.helpers import to_3tuple
@@ -50,10 +50,9 @@ def test_patch_embed(img_size, patch_size, in_chans=1, embed_dim=768, use_cuda=T
         print(f"✗ Model creation failed: {e}")
         return False
     
-    # Create dummy input
-    # Input shape: [B, L, S] where S = img_size[0]*img_size[1]*img_size[2]*in_chans
-    B = 2  # batch size
-    L = 9  # number of patches (selected patches)
+   
+    B = 2  
+    L = 9  
     S = img_size[0] * img_size[1] * img_size[2] * in_chans
     
     print(f"\nInput shape: [B={B}, L={L}, S={S}]")
@@ -70,7 +69,7 @@ def test_patch_embed(img_size, patch_size, in_chans=1, embed_dim=768, use_cuda=T
         device = torch.device('cpu')
         print(f"✓ Using CPU")
     
-    # Test forward pass
+
     print(f"\nRunning forward pass...")
     try:
         with torch.no_grad():
@@ -118,7 +117,7 @@ def test_gather_operation(input_size, patch_size, in_chans=1, mask_ratio=0.75, u
     input_size = to_3tuple(input_size)
     patch_size = to_3tuple(patch_size)
     
-    # Calculate grid_size (same as in MAE3D.__init__)
+
     grid_size = []
     for in_sz, pa_sz in zip(input_size, patch_size):
         assert in_sz % pa_sz == 0, f"input size {in_sz} and patch size {pa_sz} are not divisible"
@@ -136,11 +135,11 @@ def test_gather_operation(input_size, patch_size, in_chans=1, mask_ratio=0.75, u
     print(f"  selected patches: {sel_length}")
     print(f"  masked patches: {msk_length}")
     
-    # Simulate patchified image
+
     batch_size = 2
     out_chans = in_chans * np.prod(patch_size)
     
-    # Create patchified tensor: [B, length, out_chans]
+
     x = torch.randn(batch_size, length, out_chans)
     
     if use_cuda and torch.cuda.is_available():
@@ -152,9 +151,9 @@ def test_gather_operation(input_size, patch_size, in_chans=1, mask_ratio=0.75, u
     print(f"\nPatchified tensor shape: {x.shape}")
     print(f"  Expected: [B={batch_size}, length={length}, out_chans={out_chans}]")
     
-    # Test gather operation (same as in MAE3D.forward)
+
     try:
-        # Generate shuffle indices
+
         rand = torch.rand(batch_size, length).to(x.device)
         shuffle_indices = rand.argsort(dim=1)
         unshuffle_indices = shuffle_indices.argsort(dim=1)
@@ -163,12 +162,12 @@ def test_gather_operation(input_size, patch_size, in_chans=1, mask_ratio=0.75, u
         print(f"  Min index: {shuffle_indices.min().item()}, Max index: {shuffle_indices.max().item()}")
         print(f"  Expected range: [0, {length-1}]")
         
-        # Validate indices
+
         if shuffle_indices.max() >= length or shuffle_indices.min() < 0:
             print(f"✗ Invalid shuffle indices!")
             return False
         
-        # Test gather operation (this is where the error occurs)
+
         print(f"\nTesting gather operation...")
         shuffled_x = x.gather(dim=1, index=shuffle_indices[:, :, None].expand(-1, -1, out_chans))
         sel_x = shuffled_x[:, :sel_length, :]
@@ -177,9 +176,9 @@ def test_gather_operation(input_size, patch_size, in_chans=1, mask_ratio=0.75, u
         print(f"  shuffled_x shape: {shuffled_x.shape}")
         print(f"  sel_x shape: {sel_x.shape}")
         
-        # Test position embedding gather (this is where the actual error occurs)
+       
         print(f"\nTesting position embedding gather...")
-        # Simulate position embedding
+       
         pos_embed = torch.randn(1, length, 768).to(x.device)
         print(f"  pos_embed shape: {pos_embed.shape}")
         print(f"  sel_indices shape: {shuffle_indices[:, :sel_length].shape}")
@@ -216,14 +215,14 @@ def main():
     print("PatchEmbed3D cuDNN Issue & Gather Operation Test")
     print("="*60)
     
-    # Check CUDA availability
+
     cuda_available = torch.cuda.is_available()
     print(f"\nCUDA available: {cuda_available}")
     if cuda_available:
         print(f"CUDA device: {torch.cuda.get_device_name(0)}")
         print(f"CUDA version: {torch.version.cuda}")
     
-    # Test 1: The problematic case (exact-size kernel)
+
     print("\n" + "="*60)
     print("TEST 1: Exact-size kernel case (img_size == patch_size)")
     print("="*60)
@@ -236,7 +235,7 @@ def main():
         use_cuda=cuda_available
     )
     
-    # Test 2: Normal case (different sizes)
+
     print("\n" + "="*60)
     print("TEST 2: Normal case (img_size != patch_size)")
     print("="*60)
@@ -249,7 +248,7 @@ def main():
         use_cuda=cuda_available
     )
     
-    # Test 3: Gather operation (the actual error from training)
+
     print("\n" + "="*60)
     print("TEST 3: Gather operation (index out of bounds)")
     print("="*60)
@@ -262,7 +261,7 @@ def main():
         use_cuda=cuda_available
     )
     
-    # Summary
+
     print("\n" + "="*60)
     print("SUMMARY")
     print("="*60)

@@ -10,16 +10,10 @@ import glob
 from pathlib import Path
 
 def create_transunet_json(data_path, output_file='transunet.json'):
-    """
-    Create transunet.json file for BTCV dataset.
-    
-    Args:
-        data_path: Path to the directory containing BTCV data
-        output_file: Name of the output JSON file (will be saved in data_path)
-    """
+  
     data_path = Path(data_path)
     
-    # Common BTCV directory structures
+
     possible_image_dirs = [
         data_path / 'averaged-training-images',
         data_path / 'averaged-training-images ',
@@ -42,38 +36,38 @@ def create_transunet_json(data_path, output_file='transunet.json'):
         data_path / 'labels',
     ]
     
-    # Find image directory
+
     image_dir = None
     for img_dir in possible_image_dirs:
         if img_dir.exists():
             image_dir = img_dir
             break
     
-    # If not found, search for any directory with "image" in name
+   
     if image_dir is None:
         for item in data_path.iterdir():
             if item.is_dir() and ('image' in item.name.lower() or 'img' in item.name.lower()):
-                # Check if it has .nii.gz files
+         
                 if list(item.glob('*.nii.gz')) or list(item.glob('*.nii')):
                     image_dir = item
                     print(f"Found image directory by search: {image_dir}")
                     break
     
-    # Find label directory
+   
     label_dir = None
     for lbl_dir in possible_label_dirs:
         if lbl_dir.exists():
             label_dir = lbl_dir
             break
     
-    # If not found, search for any directory with "label" in name (including those with trailing spaces)
+   
     if label_dir is None:
         for item in data_path.iterdir():
-            item_name = item.name  # This preserves trailing spaces
+            item_name = item.name 
             if item.is_dir() and ('label' in item_name.lower() or 'seg' in item_name.lower() or 'mask' in item_name.lower()):
-                # Use the actual directory name as found (with space if present)
+              
                 test_path = data_path / item_name
-                # Check if it has .nii.gz files
+                
                 nii_files = list(test_path.glob('*.nii.gz')) + list(test_path.glob('*.nii'))
                 if nii_files:
                     label_dir = test_path
@@ -107,11 +101,10 @@ def create_transunet_json(data_path, output_file='transunet.json'):
     
     print(f"Found {len(image_files)} image files")
     
-    # Create training list
+
     training_list = []
     
-    # Get all label files for matching - handle trailing spaces in directory name
-    # Use os.path.join to preserve trailing spaces in directory names
+
     import os
     label_pattern1 = os.path.join(str(label_dir), '*.nii.gz')
     label_pattern2 = os.path.join(str(label_dir), '*.nii')
@@ -125,7 +118,7 @@ def create_transunet_json(data_path, output_file='transunet.json'):
             sample += f", {Path(all_label_files[1]).name}"
         print(f"Sample label files: {sample}")
     
-    # Create a dictionary of label files by filename for fast lookup
+
     label_dict = {}
     for lbl_file in all_label_files:
         lbl_path = Path(lbl_file)
@@ -136,16 +129,16 @@ def create_transunet_json(data_path, output_file='transunet.json'):
         sample_keys = list(label_dict.keys())[:5]
         print(f"Sample label filenames: {sample_keys}")
     
-    # Show sample image filenames for comparison
+
     sample_images = [Path(f).name for f in image_files[:5]]
     print(f"Sample image filenames: {sample_images}")
     print(f"\nMatching images to labels...")
     
-    # Create sets of base IDs (without _avg.nii.gz) for both images and labels
+   
     image_ids = {Path(f).stem.replace('.nii', '').replace('.gz', '').replace('_avg', '') for f in image_files}
     label_ids = {Path(f).stem.replace('.nii', '').replace('.gz', '').replace('_avg', '') for f in all_label_files}
     
-    # Find matching IDs
+
     matching_ids = image_ids.intersection(label_ids)
     print(f"Found {len(matching_ids)} matching IDs between {len(image_ids)} images and {len(label_ids)} labels")
     
@@ -157,26 +150,26 @@ def create_transunet_json(data_path, output_file='transunet.json'):
         print(f"You may need to check if you have the correct image/label pairs.")
         return False
     
-    # Create a reverse lookup: ID -> full filename for labels
+
     label_by_id = {}
     for lbl_file in all_label_files:
         lbl_path = Path(lbl_file)
         lbl_id = lbl_path.stem.replace('.nii', '').replace('.gz', '').replace('_avg', '')
         label_by_id[lbl_id] = lbl_path
     
-    # Create a reverse lookup: ID -> full filename for images
+
     image_by_id = {}
     for img_file in image_files:
         img_path = Path(img_file)
         img_id = img_path.stem.replace('.nii', '').replace('.gz', '').replace('_avg', '')
         image_by_id[img_id] = img_path
     
-    # Create training list for matching IDs
+
     for match_id in sorted(matching_ids):
         img_file = image_by_id[match_id]
         label_file = label_by_id[match_id]
         
-        # Get relative paths from data_path
+
         img_rel = os.path.relpath(str(img_file), data_path)
         label_rel = os.path.relpath(str(label_file), data_path)
         
@@ -200,13 +193,13 @@ def create_transunet_json(data_path, output_file='transunet.json'):
         print(f"3. Use only the subset that has matching pairs")
         return False
     
-    # Create JSON structure (MONAI decathlon format)
+
     json_data = {
         "training": training_list,
-        "validation": []  # Empty for now, can be filled later
+        "validation": [] 
     }
     
-    # Save JSON file
+
     output_path = data_path / output_file
     with open(output_path, 'w') as f:
         json.dump(json_data, f, indent=2)

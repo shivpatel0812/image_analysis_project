@@ -24,7 +24,10 @@ def load_medical_image(path):
         if arr.ndim == 3:
             arr = arr[arr.shape[0] // 2]
         arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
-        return Image.fromarray(arr.astype(np.uint8))
+        # Ensure 2D array and explicitly create grayscale image
+        if arr.ndim != 2:
+            raise ValueError(f"Expected 2D array, got {arr.ndim}D array")
+        return Image.fromarray(arr.astype(np.uint8), mode='L')
     else:
         return Image.open(path)
 
@@ -38,18 +41,24 @@ class ImageListDataset(VisionDataset):
         with open(listfile) as f:
             lines = f.readlines()
             for line in lines:
-                items = line.strip().split()
-                image_path = os.path.join(data_root, items[0])
-                if not nolabel:
+                line = line.strip()
+                if not line:  # Skip empty lines
+                    continue
+                items = line.split()
+                if nolabel:
+                    # For nolabel=True, the entire line is the path (may contain spaces)
+                    image_path = os.path.join(data_root, line)
+                else:
+                    # For labeled data, first item is path, rest are labels
+                    image_path = os.path.join(data_root, items[0])
                     if not multiclass:
                         label = int(items[1])
                     elif multiclass:
                         label = list(map(float, items[1:]))
                     else:
                         raise ValueError("Line format is not right")
-                self.image_list.append(image_path)
-                if not nolabel:
                     self.label_list.append(label)
+                self.image_list.append(image_path)
 
         self.transform = transform
         self.gray = gray

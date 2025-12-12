@@ -26,17 +26,17 @@ crop_min: 0.2
 # trainer
 trainer_name: MAETrainer
 lr: 1.5e-4
-batch_size: 32 # Reduced from 64
+batch_size: 32
 vis_batch_size: 4
 start_epoch: 0
 warmup_epochs: 40
-epochs: 800 # Increased from 200
+epochs: 800
 workers: 4
 resume:
 
-# model
-patchembed: PatchEmbed2D # ADDED
-pos_embed_type: sincos # ADDED
+# model - ALL REQUIRED PARAMETERS
+patchembed: PatchEmbed2D
+pos_embed_type: sincos
 mask_ratio: 0.75
 input_size: 224
 patch_size: 16
@@ -47,6 +47,8 @@ encoder_num_heads: 12
 decoder_embed_dim: 256
 decoder_depth: 8
 decoder_num_heads: 8
+fourier_embed_dim: 24 # ← MISSING - REQUIRED!
+fourier_temperature: 0.01 # ← MISSING - REQUIRED!
 
 # optimizer
 type: adamw
