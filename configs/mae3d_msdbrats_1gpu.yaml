@@ -7,15 +7,16 @@ dec_arch: MAEViTDecoder
 proj_name: mae3d
 run_name: ${proj_name}_${arch}_${dataset}
 wandb_id:
+disable_wandb: false
 
 # dataset
 dataset: msd_brats
-data_path: /nvme/zhoulei/MSD
+data_path: /home/njt4xc/SelfMedMAE
 data_seed: 12345
 ts_fold: 0
 
 # output
-output_dir: /nvme/zhoulei/ssl-framework/${run_name}
+output_dir: /home/njt4xc/outputs/${run_name}
 ckpt_dir: ${output_dir}/ckpts
 
 # data preprocessing

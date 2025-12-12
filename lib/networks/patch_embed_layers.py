@@ -6,8 +6,6 @@ from timm.models.layers.helpers import to_2tuple, to_3tuple
 import numpy as np
 
 class PatchEmbed2D(nn.Module):
-    """ 2D Image to Patch Embedding
-    """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None, flatten=True, in_chan_last=True):
         super().__init__()
         img_size = to_2tuple(img_size)
@@ -17,7 +15,6 @@ class PatchEmbed2D(nn.Module):
         self.grid_size = []
         for im_size, pa_size in zip(img_size, patch_size):
             self.grid_size.append(im_size // pa_size)
-        # self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1], img_size[2] // patch_size[2])
         self.in_chans = in_chans
         self.num_patches = np.prod(self.grid_size)
         self.flatten = flatten
@@ -31,18 +28,16 @@ class PatchEmbed2D(nn.Module):
         assert S == np.prod(self.img_size) * self.in_chans, \
             f"Input image total size {S} doesn't match model configuration"
         if self.in_chan_last:
-            x = x.reshape(B * L, *self.img_size, self.in_chans).permute(0, 3, 1, 2) # When patchification follows HWC
+            x = x.reshape(B * L, *self.img_size, self.in_chans).permute(0, 3, 1, 2)
         else:
             x = x.reshape(B * L, self.in_chans, *self.img_size)
         x = self.proj(x)
         if self.flatten:
-            x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
+            x = x.flatten(2).transpose(1, 2)
         x = self.norm(x)
         return x
 
 class PatchEmbed3D(nn.Module):
-    """ 3D Image to Patch Embedding
-    """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None, flatten=True, in_chan_last=True):
         super().__init__()
         img_size = to_3tuple(img_size)
@@ -52,27 +47,41 @@ class PatchEmbed3D(nn.Module):
         self.grid_size = []
         for im_size, pa_size in zip(img_size, patch_size):
             self.grid_size.append(im_size // pa_size)
-        # self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1], img_size[2] // patch_size[2])
         self.in_chans = in_chans
         self.num_patches = np.prod(self.grid_size)
         self.flatten = flatten
         self.in_chan_last = in_chan_last
 
-        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.use_linear = (img_size[0] == patch_size[0] and 
+                          img_size[1] == patch_size[1] and 
+                          img_size[2] == patch_size[2])
+        
+        if self.use_linear:
+            patch_volume = int(np.prod(patch_size) * in_chans)
+            self.proj = nn.Linear(patch_volume, embed_dim)
+        else:
+            self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x):
-        # import pdb
-        # pdb.set_trace()
         B, L, S = x.shape
         assert S == np.prod(self.img_size) * self.in_chans, \
-            f"Input image total size {S} doesn't match model configuration"
-        if self.in_chan_last:
-            x = x.reshape(B * L, *self.img_size, self.in_chans).permute(0, 4, 1, 2, 3) # When patchification follows HWDC
+            f"Input image total size {S} doesn't match model configuration (expected {np.prod(self.img_size) * self.in_chans})"
+        
+        if self.use_linear:
+            x = x.reshape(B * L, S)
+            x = self.proj(x)
         else:
-            x = x.reshape(B * L, self.in_chans, *self.img_size)
-        x = self.proj(x)
-        if self.flatten:
-            x = x.flatten(2).transpose(1, 2)  # BCHWD -> BNC
+            if self.in_chan_last:
+                x = x.reshape(B * L, *self.img_size, self.in_chans).permute(0, 4, 1, 2, 3)
+            else:
+                x = x.reshape(B * L, self.in_chans, *self.img_size)
+            
+            x = x.contiguous()
+            x = self.proj(x)
+            if self.flatten:
+                x = x.flatten(2).transpose(1, 2)
+        
         x = self.norm(x)
         return x

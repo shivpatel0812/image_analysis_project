@@ -2,10 +2,12 @@ import os
 import math
 import time
 from functools import partial
-from matplotlib.pyplot import grid
 import numpy as np
 from numpy import nanmean, nonzero, percentile
-from torchprofile import profile_macs
+try:
+    from torchprofile import profile_macs
+except ImportError:
+    profile_macs = None
 
 import torch
 import torchvision
@@ -135,13 +137,23 @@ class SegTrainer(BaseTrainer):
                             pe = torch.zeros([1, 1, state_dict[key].size(-1)])
                             state_dict['pos_embed'] = torch.cat([pe, state_dict[key]], dim=1)
                             del state_dict[key]
-                        if key == 'patch_embed.proj.weight' and \
-                            state_dict['patch_embed.proj.weight'].shape != self.model.encoder.patch_embed.proj.weight.shape:
+                    # Delete mismatched keys BEFORE loading to avoid RuntimeError
+                    # Check patch_embed.proj.weight (may be Linear from MAE or Conv3d in UNETR)
+                    if 'patch_embed.proj.weight' in state_dict:
+                        checkpoint_shape = state_dict['patch_embed.proj.weight'].shape
+                        model_shape = self.model.encoder.patch_embed.proj.weight.shape
+                        if checkpoint_shape != model_shape:
+                            print(f"=> Skipping patch_embed.proj.weight: checkpoint shape {checkpoint_shape} != model shape {model_shape}")
                             del state_dict['patch_embed.proj.weight']
-                            del state_dict['patch_embed.proj.bias']
-                        if key == 'pos_embed' and \
-                            state_dict['pos_embed'].shape != self.model.encoder.pos_embed.shape:
-                            del state_dict[key]
+                            if 'patch_embed.proj.bias' in state_dict:
+                                del state_dict['patch_embed.proj.bias']
+                    # Check pos_embed (may have different number of patches)
+                    if 'pos_embed' in state_dict:
+                        checkpoint_shape = state_dict['pos_embed'].shape
+                        model_shape = self.model.encoder.pos_embed.shape
+                        if checkpoint_shape != model_shape:
+                            print(f"=> Skipping pos_embed: checkpoint shape {checkpoint_shape} != model shape {model_shape}")
+                            del state_dict['pos_embed']
                     msg = self.model.encoder.load_state_dict(state_dict, strict=False)
                 elif self.model_name == 'DynSeg3d':
                     if args.pretrain_load == 'enc+dec':
@@ -395,6 +407,17 @@ class SegTrainer(BaseTrainer):
             ts_meters = None
         print(f"val samples: {val_samples} and test samples: {ts_samples}")
 
+        # Handle empty validation set
+        if val_samples == 0:
+            print("=> Warning: No validation samples found. Skipping evaluation.")
+            print("=> Finish Evaluating")
+            if args.dataset == 'btcv':
+                return [0.0]  # Return default value
+            elif args.dataset == 'msd_brats':
+                return [0.0] if ts_meters is None else [0.0, 0.0]
+            else:
+                return [0.0]
+
         # switch to evaluation mode
         model.eval()
         for i, batch_data in enumerate(val_loader):
@@ -465,12 +488,23 @@ class SegTrainer(BaseTrainer):
 
         if args.dataset == 'btcv':
             assert ts_meters is None
-            return [meters['cls8_Dice'].global_avg]
+            # Check if meter was updated (has samples)
+            if 'cls8_Dice' in meters and meters['cls8_Dice'].count > 0:
+                return [meters['cls8_Dice'].global_avg]
+            else:
+                print("=> Warning: No validation samples processed. Returning default metric.")
+                return [0.0]
         elif args.dataset == 'msd_brats':
             if ts_meters is None:
-                return [meters['Dice'].global_avg]
+                if 'Dice' in meters and meters['Dice'].count > 0:
+                    return [meters['Dice'].global_avg]
+                else:
+                    print("=> Warning: No validation samples processed. Returning default metric.")
+                    return [0.0]
             else:
-                return [meters['Dice'].global_avg, ts_meters['Dice'].global_avg]
+                dice_val = meters['Dice'].global_avg if 'Dice' in meters and meters['Dice'].count > 0 else 0.0
+                dice_ts = ts_meters['Dice'].global_avg if 'Dice' in ts_meters and ts_meters['Dice'].count > 0 else 0.0
+                return [dice_val, dice_ts]
 
     @torch.no_grad()
     def visualize(self, channel_ind=0, directory='seg_vis'):
@@ -796,9 +830,12 @@ class SegTrainer(BaseTrainer):
                 image = image.cuda(args.gpu, non_blocking=True) # [B, 4, IH, IW, ID]
             print(f"image shape is {image.shape}")
             if t == 0:
-                try:
-                    macs = profile_macs(model, single_image) * 1e-9
-                except:
+                if profile_macs is not None:
+                    try:
+                        macs = profile_macs(model, single_image) * 1e-9
+                    except:
+                        macs = -1
+                else:
                     macs = -1
                 print(f"MACS is {macs} G")
             # target = batch_data['label']

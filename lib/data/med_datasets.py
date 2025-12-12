@@ -88,12 +88,13 @@ def get_json_trainset(args, workers, train_transform=None):
                                         True,
                                         "training",
                                         base_dir=data_dir)
+    # Cache all data but limit workers to prevent OOM
     train_ds = data.CacheDataset(
         data=datalist,
         transform=train_transform,
-        cache_num=len(datalist),
+        cache_num=len(datalist),  # Restored original - cache all
         cache_rate=1.0,
-        num_workers=workers,
+        num_workers=min(workers, 4),  # Limit to 4 workers max
     )
     return train_ds
 
@@ -162,13 +163,16 @@ def get_train_loader(args, batch_size, workers, train_transform=None):
         raise NotImplementedError(f"{args.dataset} is not supported yet.")
 
     train_sampler = Sampler(train_ds) if args.distributed else None
+    # Limit workers but keep reasonable number
+    num_workers = min(workers, 4)  # Max 4 workers
     train_loader = data.DataLoader(train_ds,
                                     batch_size=batch_size,
                                     shuffle=(train_sampler is None),
-                                    num_workers=workers,
+                                    num_workers=num_workers,
                                     sampler=train_sampler,
                                     pin_memory=True,
-                                    persistent_workers=_persistent_workers)
+                                    persistent_workers=_persistent_workers if num_workers > 0 else False,
+                                    prefetch_factor=2 if num_workers > 0 else None)
     return train_loader
 
 def get_val_loader(args, batch_size, workers, val_transform=None):
@@ -182,11 +186,13 @@ def get_val_loader(args, batch_size, workers, val_transform=None):
                                 ts_fold=args.ts_fold, 
                                 seed=args.data_seed)
     val_sampler = Sampler(val_ds, shuffle=False) if args.distributed else None
+    num_workers = min(workers, 4)  # Limit workers
     val_loader = data.DataLoader(val_ds,
                                  batch_size=batch_size,
                                  shuffle=False,
-                                 num_workers=workers,
+                                 num_workers=num_workers,
                                  sampler=val_sampler,
                                  pin_memory=True,
-                                 persistent_workers=_persistent_workers)
+                                 persistent_workers=_persistent_workers if num_workers > 0 else False,
+                                 prefetch_factor=2 if num_workers > 0 else None)
     return val_loader

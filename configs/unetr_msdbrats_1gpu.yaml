@@ -12,13 +12,13 @@ disable_wandb: 0
 # dataset
 dataset: msd_brats
 # data_path: /data/leizhou/
-data_path: /nvme/zhoulei/MSD
+data_path: /home/njt4xc/SelfMedMAE
 data_seed: 12345
 ts_fold: 0
 ts_ratio: 0.
 
 # output
-output_dir: /nvme/zhoulei/ssl-framework/${run_name}
+output_dir: /home/njt4xc/outputs/${run_name}
 ckpt_dir: ${output_dir}/ckpts
 
 # data preprocessing

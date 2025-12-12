@@ -6,6 +6,16 @@ import torch.multiprocessing as mp
 # torch.multiprocessing.set_sharing_strategy('file_system')
 import wandb
 
+# Disable cuDNN auto-tuning to avoid internal errors with unusual tensor shapes
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
+
+# Memory optimizations
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()  # Clear cache at start
+    # Set memory fraction to prevent OOM
+    torch.cuda.set_per_process_memory_fraction(0.9)
+
 import sys
 sys.path.append('lib/')
 

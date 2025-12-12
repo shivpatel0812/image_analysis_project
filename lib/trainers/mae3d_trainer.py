@@ -133,29 +133,41 @@ class MAE3DTrainer(BaseTrainer):
         
         load_start_time = time.time()
         for i, batch_data in enumerate(train_loader):
-            load_time = time.time() - load_start_time
-            # adjust learning at the beginning of each iteration
-            self.adjust_learning_rate(epoch + i / self.iters_per_epoch, args)
+            try:
+                load_time = time.time() - load_start_time
+                # adjust learning at the beginning of each iteration
+                self.adjust_learning_rate(epoch + i / self.iters_per_epoch, args)
 
-            # For SSL pretraining, only image data is required for training
-            image = batch_data['image']
+                # For SSL pretraining, only image data is required for training
+                image = batch_data['image']
 
-            if args.gpu is not None:
-                image = image.cuda(args.gpu, non_blocking=True)
+                if args.gpu is not None:
+                    image = image.cuda(args.gpu, non_blocking=True)
 
-            # compute output and loss
-            forward_start_time = time.time()
-            with torch.cuda.amp.autocast(True):
-                loss = model(image, return_image=False)
-            forward_time = time.time() - forward_start_time
+                # compute output and loss
+                forward_start_time = time.time()
+                with torch.cuda.amp.autocast(True):
+                    loss = model(image, return_image=False)
+                forward_time = time.time() - forward_start_time
 
-            # compute gradient and do SGD step
-            bp_start_time = time.time()
-            optimizer.zero_grad()
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            bp_time = time.time() - bp_start_time
+                # compute gradient and do SGD step
+                bp_start_time = time.time()
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                bp_time = time.time() - bp_start_time
+                
+                # Clear cache periodically to prevent memory buildup
+                if i % 10 == 0:
+                    torch.cuda.empty_cache()
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    print(f"OOM at iteration {i}, skipping batch")
+                    torch.cuda.empty_cache()
+                    continue
+                else:
+                    raise e
 
             # Log to the screen
             if i % args.print_freq == 0:
