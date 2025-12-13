@@ -66,6 +66,7 @@ def build_model(checkpoint_path, device, num_classes=2, in_chans=1):
     args.num_classes = num_classes
     args.roi_x = 224
     args.roi_y = 224
+    args.roi_z = 16  # Needed for 2D->3D conversion
     
     model = getattr(models, 'UNETR3D')(
         encoder=getattr(networks, args.enc_arch),
@@ -86,7 +87,18 @@ def build_model(checkpoint_path, device, num_classes=2, in_chans=1):
     return model, args
 
 
-def preprocess_2d(image_2d, target_size=(224, 224)):
+def preprocess_2d(image_2d, target_size=(224, 224), a_min=-175.0, a_max=250.0, b_min=0.0, b_max=1.0):
+    """
+    Preprocess 2D image to match training pipeline:
+    1. Scale intensity range (like ScaleIntensityRanged in training)
+    2. Resize/crop to target size
+    """
+    # Step 1: Scale intensity range (matches training: a_min=-175.0, a_max=250.0, b_min=0.0, b_max=1.0)
+    image_2d = np.clip(image_2d, a_min, a_max)
+    image_2d = (image_2d - a_min) / (a_max - a_min + 1e-8)  # Normalize to [0, 1]
+    image_2d = image_2d * (b_max - b_min) + b_min  # Scale to [b_min, b_max]
+    
+    # Step 2: Resize/crop to target size
     h, w = image_2d.shape
     
     if h != target_size[0] or w != target_size[1]:
@@ -101,7 +113,6 @@ def preprocess_2d(image_2d, target_size=(224, 224)):
             padded[ph:ph+image_2d.shape[0], pw:pw+image_2d.shape[1]] = image_2d
             image_2d = padded
     
-    image_2d = (image_2d - image_2d.min()) / (image_2d.max() - image_2d.min() + 1e-8)
     return image_2d
 
 
@@ -142,21 +153,31 @@ def main():
         if len(image_2d.shape) == 3:
             image_2d = image_2d[0]
         
-        image_2d = preprocess_2d(image_2d, target_size=(model_args.roi_x, model_args.roi_y))
+        # Use same intensity scaling as training (a_min=-175.0, a_max=250.0, b_min=0.0, b_max=1.0)
+        image_2d = preprocess_2d(image_2d, target_size=(model_args.roi_x, model_args.roi_y), 
+                                  a_min=-175.0, a_max=250.0, b_min=0.0, b_max=1.0)
         
-        image_tensor = torch.from_numpy(image_2d).unsqueeze(0).unsqueeze(0).float()
+        # Convert 2D to 3D: (H, W) -> (B, C, H, W, D) where D=roi_z
+        # Replicate along depth dimension to match training format
+        image_2d = np.expand_dims(image_2d, axis=0)  # (1, H, W) - add channel dim
+        image_3d = np.repeat(image_2d, model_args.roi_z, axis=0)  # (D, H, W)
+        image_3d = np.expand_dims(image_3d, axis=0)  # (1, D, H, W) - add batch dim
+        image_3d = np.transpose(image_3d, (0, 2, 3, 1))  # (1, H, W, D)
+        image_3d = np.expand_dims(image_3d, axis=1)  # (1, 1, H, W, D) - add channel dim
+        image_tensor = torch.from_numpy(image_3d).float()
         image_tensor = image_tensor.to(device)
         
         with torch.no_grad():
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 output = model(image_tensor)
         
+        # Output shape: (B, C, H, W) for 2D segmentation
         if args.num_classes > 1:
-            pred = torch.argmax(output, dim=1)
+            pred = torch.argmax(output, dim=1)  # (B, H, W)
+            pred_2d = pred.cpu().numpy()[0]  # (H, W)
         else:
-            pred = (torch.sigmoid(output) > 0.5).long()
-        
-        pred_2d = pred.cpu().numpy()[0, 0]
+            pred = (torch.sigmoid(output) > 0.5).long()  # (B, 1, H, W)
+            pred_2d = pred.cpu().numpy()[0, 0]  # (H, W)
         
         if label_path.exists():
             label_2d = load_mhd_image(label_path)

@@ -137,16 +137,34 @@ class SegTrainer(BaseTrainer):
                             pe = torch.zeros([1, 1, state_dict[key].size(-1)])
                             state_dict['pos_embed'] = torch.cat([pe, state_dict[key]], dim=1)
                             del state_dict[key]
-                    # Delete mismatched keys BEFORE loading to avoid RuntimeError
-                    # Check patch_embed.proj.weight (may be Linear from MAE or Conv3d in UNETR)
+                    # Convert 2D Conv2d weights to 3D Conv3d weights if needed
+                    # Check patch_embed.proj.weight (may be Conv2d from 2D MAE or Conv3d in UNETR)
                     if 'patch_embed.proj.weight' in state_dict:
                         checkpoint_shape = state_dict['patch_embed.proj.weight'].shape
                         model_shape = self.model.encoder.patch_embed.proj.weight.shape
                         if checkpoint_shape != model_shape:
-                            print(f"=> Skipping patch_embed.proj.weight: checkpoint shape {checkpoint_shape} != model shape {model_shape}")
-                            del state_dict['patch_embed.proj.weight']
-                            if 'patch_embed.proj.bias' in state_dict:
-                                del state_dict['patch_embed.proj.bias']
+                            # Try to convert 2D Conv2d to 3D Conv3d: [C_out, C_in, H, W] -> [C_out, C_in, H, W, 1]
+                            if len(checkpoint_shape) == 4 and len(model_shape) == 5:
+                                if (checkpoint_shape[0] == model_shape[0] and 
+                                    checkpoint_shape[1] == model_shape[1] and
+                                    checkpoint_shape[2] == model_shape[2] and
+                                    checkpoint_shape[3] == model_shape[3] and
+                                    model_shape[4] == 1):
+                                    print(f"=> Converting 2D Conv2d weights to 3D Conv3d: {checkpoint_shape} -> {model_shape}")
+                                    state_dict['patch_embed.proj.weight'] = state_dict['patch_embed.proj.weight'].unsqueeze(-1)
+                                    if 'patch_embed.proj.bias' in state_dict:
+                                        # Bias doesn't need conversion, it's 1D
+                                        pass
+                                else:
+                                    print(f"=> Skipping patch_embed.proj.weight: cannot convert {checkpoint_shape} to {model_shape}")
+                                    del state_dict['patch_embed.proj.weight']
+                                    if 'patch_embed.proj.bias' in state_dict:
+                                        del state_dict['patch_embed.proj.bias']
+                            else:
+                                print(f"=> Skipping patch_embed.proj.weight: checkpoint shape {checkpoint_shape} != model shape {model_shape}")
+                                del state_dict['patch_embed.proj.weight']
+                                if 'patch_embed.proj.bias' in state_dict:
+                                    del state_dict['patch_embed.proj.bias']
                     # Check pos_embed (may have different number of patches)
                     if 'pos_embed' in state_dict:
                         checkpoint_shape = state_dict['pos_embed'].shape
@@ -325,6 +343,11 @@ class SegTrainer(BaseTrainer):
                 image = image.cuda(args.gpu, non_blocking=True)
                 target = target.cuda(args.gpu, non_blocking=True)
 
+            # For 2D, squeeze depth dimension from target to match decoder output
+            if args.spatial_dim == 2 and target.dim() == 5:
+                # target is [B, C, H, W, D], squeeze to [B, C, H, W]
+                target = target[:, :, :, :, target.shape[4] // 2]
+
             if mixup_fn is not None:
                 image, target = mixup_fn(image, target)
 
@@ -425,6 +448,14 @@ class SegTrainer(BaseTrainer):
             if args.gpu is not None:
                 image = image.to(args.gpu, non_blocking=True)
                 target = target.to(args.gpu, non_blocking=True)
+
+            # For 2D, squeeze depth dimension from target to match decoder output
+            if args.spatial_dim == 2 and target.dim() == 5:
+                target = target[:, :, :, :, target.shape[4] // 2]
+
+            # For 2D, squeeze depth dimension from target to match decoder output
+            if args.spatial_dim == 2 and target.dim() == 5:
+                target = target[:, :, :, :, target.shape[4] // 2]
 
             # compute output
             with torch.cuda.amp.autocast():
@@ -533,6 +564,10 @@ class SegTrainer(BaseTrainer):
             if args.gpu is not None:
                 image = image.to(args.gpu, non_blocking=True)
                 target = target.to(args.gpu, non_blocking=True)
+
+            # For 2D, squeeze depth dimension from target to match decoder output
+            if args.spatial_dim == 2 and target.dim() == 5:
+                target = target[:, :, :, :, target.shape[4] // 2]
 
             # compute output
             with torch.cuda.amp.autocast():

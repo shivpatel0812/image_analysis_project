@@ -88,11 +88,12 @@ def get_json_trainset(args, workers, train_transform=None):
                                         True,
                                         "training",
                                         base_dir=data_dir)
-    # Cache all data but limit workers to prevent OOM
+    # Cache subset of data to prevent OOM (cache 200 samples max)
+    cache_size = min(1000, len(datalist))
     train_ds = data.CacheDataset(
         data=datalist,
         transform=train_transform,
-        cache_num=len(datalist),  # Restored original - cache all
+        cache_num=cache_size,  # Cache only 200 samples to prevent OOM
         cache_rate=1.0,
         num_workers=min(workers, 4),  # Limit to 4 workers max
     )

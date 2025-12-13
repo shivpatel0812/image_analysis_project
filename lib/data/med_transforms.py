@@ -84,10 +84,14 @@ def get_scratch_train_transforms(args):
                                                 b_max=args.b_max,
                                                 clip=True),
                 transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
+                # Resize to ensure minimum size for cropping (for 2D images)
+                transforms.Resized(keys=["image", "label"],
+                                  spatial_size=(max(args.roi_x, 256), max(args.roi_y, 256), args.roi_z),
+                                  mode=("trilinear", "nearest")),
                 transforms.RandCropByPosNegLabeld(
                     keys=["image", "label"],
                     label_key="label",
-                    spatial_size=(args.roi_x, args.roi_y, args.roi_z),  # Should be (96, 96, 16)
+                    spatial_size=(args.roi_x, args.roi_y, args.roi_z),  # Should be (224, 224, 16)
                     pos=1,
                     neg=1,
                     num_samples=args.num_samples,

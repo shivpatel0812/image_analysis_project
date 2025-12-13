@@ -4,8 +4,8 @@ enc_arch: ViTBackbone
 dec_arch: UNETR_decoder
 
 # wandb
-proj_name: UNETR2D
-run_name: ${proj_name}_${arch}_${dataset}
+proj_name: UNETR3D
+run_name: ${proj_name}_${arch}_${dataset}_scratch
 wandb_id:
 disable_wandb: false
 
@@ -28,7 +28,7 @@ b_min: 0.0
 b_max: 1.0
 roi_x: 224
 roi_y: 224
-roi_z: 1
+roi_z: 16
 RandFlipd_prob: 0.2
 RandRotate90d_prob: 0.2
 RandScaleIntensityd_prob: 0.1
@@ -44,7 +44,7 @@ val_batch_size: 1
 start_epoch: 0
 warmup_epochs: 50
 epochs: 500
-workers: 4
+workers: 2
 pretrain:
 resume:
 
@@ -96,4 +96,3 @@ seed:
 
 # debugging
 debug: false
-
