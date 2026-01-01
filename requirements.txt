@@ -1,0 +1,29 @@
+# Core PyTorch (install separately based on your CUDA version)
+# For CUDA 10.1: conda install pytorch=1.7.1 torchvision=0.8.2 cudatoolkit=10.1 -c pytorch
+# For CUDA 11.x: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Medical Imaging
+monai>=0.9.0
+nibabel==3.2.1
+
+# Configuration
+omegaconf==2.1.1
+
+# Vision Transformer
+timm==0.4.12
+
+# Logging and Visualization
+wandb
+
+# Utilities
+scikit-learn
+numpy
+tqdm
+Pillow
+
+# Optional: for profiling (used in seg_trainer.py)
+# torchprofile
+
+
+
+
