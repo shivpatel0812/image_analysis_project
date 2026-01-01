@@ -1,3 +1,4 @@
+from matplotlib.pyplot import grid
 from requests import patch
 import torch
 import torch.nn as nn
@@ -84,16 +85,12 @@ class UNETR3D(nn.Module):
     """
     def __init__(self, encoder, decoder, args):
         super().__init__()
-        self.spatial_dim = args.spatial_dim
         if args.spatial_dim == 3:
-            encoder_input_size = (args.roi_x, args.roi_y, args.roi_z)
-            decoder_input_size = (args.roi_x, args.roi_y, args.roi_z)
+            input_size = (args.roi_x, args.roi_y, args.roi_z)
         elif args.spatial_dim == 2:
-            # For 2D: encoder needs 3-tuple for PatchEmbed3D, decoder needs 2-tuple
-            encoder_input_size = (args.roi_x, args.roi_y, args.roi_z)  # (224, 224, 16)
-            decoder_input_size = (args.roi_x, args.roi_y)  # (224, 224)
+            input_size = (args.roi_x, args.roi_y)
 
-        self.encoder = encoder(img_size=encoder_input_size,
+        self.encoder = encoder(img_size=input_size,
                                patch_size=args.patch_size,
                                in_chans=args.in_chans,
                                embed_dim=args.encoder_embed_dim,
@@ -106,7 +103,7 @@ class UNETR3D(nn.Module):
                                )
         self.decoder = decoder(in_channels=args.in_chans,
                                out_channels=args.num_classes,
-                               img_size=decoder_input_size,
+                               img_size=input_size,
                                patch_size=args.patch_size,
                                feature_size=args.feature_size,
                                hidden_size=args.encoder_embed_dim,
@@ -138,15 +135,7 @@ class UNETR3D(nn.Module):
             time_meters['enc'].append(time.perf_counter() - s_time)
 
         s_time = time.perf_counter()
-        # For 2D, squeeze depth dimension before passing to decoder
-        if self.spatial_dim == 2:
-            # x_in is [B, C, H, W, D], squeeze D dimension to get [B, C, H, W]
-            # Take middle slice along depth dimension
-            x_in_2d = x_in[:, :, :, :, x_in.shape[4] // 2]  # [B, C, H, W]
-        else:
-            x_in_2d = x_in
-        
-        logits = self.decoder(x_in_2d, x, hidden_states)
+        logits = self.decoder(x_in, x, hidden_states)
         if time_meters is not None:
             torch.cuda.synchronize()
             time_meters['dec'].append(time.perf_counter() - s_time)

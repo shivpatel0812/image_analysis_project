@@ -1,3 +1,6 @@
+# Modified to support 2D MAE pre-training: Added medical image loading (.mhd, .nii) and 3D->2D conversion
+# Why: Original code didn't handle medical formats; needed 2D images for MAE pre-training pipeline
+
 import os
 import numpy as np
 from PIL import Image

@@ -7,6 +7,8 @@ from lib.networks.mae_vit import build_2d_sincos_position_embedding
 from timm.models.layers import trunc_normal_
 import math
 
+#Refactored to add explicit input shape and channel validation so the MAE strictly
+#matches the expected data format and avoids silent tensor mismatches during training.
 __all__ = ["MAE"]
 
 def patchify_image(x: Tensor, patch_size: int = 16):

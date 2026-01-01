@@ -168,14 +168,112 @@ def _convert_2d_to_3d(x, patch_size=16):
     Creates a contiguous copy to avoid negative stride issues."""
     arr = np.asarray(x).copy()  # Ensure contiguous array with positive strides
     if arr.ndim == 3:
-        # MONAI format: (C, H, W) -> (C, H, W, D)
-        # Replicate along depth dimension (axis 3) to match patch_size
-        depth = patch_size  # Use 16 - cuDNN fix is in main.py
-        arr = np.expand_dims(arr, axis=3)  # (C, H, W, 1)
-        arr = np.repeat(arr, depth, axis=3)  # (C, H, W, depth)
-        # Ensure shape is correct: (C, H, W, D) where D=patch_size
+        depth = patch_size
+        arr = np.expand_dims(arr, axis=3)
+        arr = np.repeat(arr, depth, axis=3)
         assert arr.shape[3] == depth, f"Depth dimension mismatch: expected {depth}, got {arr.shape[3]}"
     return arr
+
+
+def get_true_2d_train_transforms(args):
+    if args.dataset == 'btcv':
+        try:
+            import SimpleITK
+            from monai.data import ITKReader
+            reader = ITKReader()
+            load_transform = transforms.LoadImaged(keys=["image", "label"], reader=reader)
+        except (ImportError, AttributeError) as e:
+            raise RuntimeError(
+                "Cannot read .mhd files. Please install SimpleITK: pip install SimpleITK"
+            ) from e
+        
+        train_transform = transforms.Compose(
+            [
+                load_transform,
+                transforms.AddChanneld(keys=["image", "label"]),
+                transforms.Spacingd(keys=["image", "label"],
+                                    pixdim=(args.space_x, args.space_y),
+                                    mode=("bilinear", "nearest")),
+                transforms.ScaleIntensityRanged(keys=["image"],
+                                                a_min=args.a_min,
+                                                a_max=args.a_max,
+                                                b_min=args.b_min,
+                                                b_max=args.b_max,
+                                                clip=True),
+                transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
+                transforms.Resized(keys=["image", "label"],
+                                  spatial_size=(max(args.roi_x, 256), max(args.roi_y, 256)),
+                                  mode=("bilinear", "nearest")),
+                transforms.RandCropByPosNegLabeld(
+                    keys=["image", "label"],
+                    label_key="label",
+                    spatial_size=(args.roi_x, args.roi_y),
+                    pos=1,
+                    neg=1,
+                    num_samples=args.num_samples,
+                    image_key="image",
+                    image_threshold=0,
+                ),
+                transforms.RandFlipd(keys=["image", "label"],
+                                    prob=args.RandFlipd_prob,
+                                    spatial_axis=0),
+                transforms.RandFlipd(keys=["image", "label"],
+                                    prob=args.RandFlipd_prob,
+                                    spatial_axis=1),
+                transforms.RandRotate90d(
+                    keys=["image", "label"],
+                    prob=args.RandRotate90d_prob,
+                    max_k=3,
+                ),
+                transforms.RandScaleIntensityd(keys="image",
+                                            factors=0.1,
+                                            prob=args.RandScaleIntensityd_prob),
+                transforms.RandShiftIntensityd(keys="image",
+                                            offsets=0.1,
+                                            prob=args.RandShiftIntensityd_prob),
+                SafeToTensord(keys=["image", "label"]),
+            ]
+        )
+    else:
+        raise ValueError(f"Only support BTCV transforms for true 2D pipeline")
+    return train_transform
+
+
+def get_true_2d_val_transforms(args):
+    if args.dataset == 'btcv':
+        try:
+            import SimpleITK
+            from monai.data import ITKReader
+            reader = ITKReader()
+            load_transform = transforms.LoadImaged(keys=["image", "label"], reader=reader)
+        except (ImportError, AttributeError) as e:
+            raise RuntimeError(
+                "Cannot read .mhd files. Please install SimpleITK: pip install SimpleITK"
+            ) from e
+        
+        val_transform = transforms.Compose(
+            [
+                load_transform,
+                transforms.AddChanneld(keys=["image", "label"]),
+                transforms.Spacingd(keys=["image", "label"],
+                                    pixdim=(args.space_x, args.space_y),
+                                    mode=("bilinear", "nearest")),
+                transforms.ScaleIntensityRanged(keys=["image"],
+                                                a_min=args.a_min,
+                                                a_max=args.a_max,
+                                                b_min=args.b_min,
+                                                b_max=args.b_max,
+                                                clip=True),
+                transforms.CropForegroundd(keys=["image", "label"], source_key="image"),
+                transforms.Resized(keys=["image", "label"],
+                                  spatial_size=(args.roi_x, args.roi_y),
+                                  mode=("bilinear", "nearest")),
+                SafeToTensord(keys=["image", "label"]),
+            ]
+        )
+    else:
+        raise ValueError(f"Only support BTCV transforms for true 2D pipeline")
+    return val_transform
 
 
 def get_mae_pretrain_transforms(args):

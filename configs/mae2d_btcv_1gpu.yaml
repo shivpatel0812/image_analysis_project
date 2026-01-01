@@ -11,12 +11,12 @@ disable_wandb: false
 
 # dataset
 dataset: btcv
-data_path: /home/njt4xc/SelfMedMAE
-tr_listfile: /home/njt4xc/SelfMedMAE/train_list.txt
-va_listfile: /home/njt4xc/SelfMedMAE/val_list.txt
+data_path: /standard/mlia/MLIA_Team14/SelfMedMAE
+tr_listfile: /standard/mlia/MLIA_Team14/SelfMedMAE/train_list.txt
+va_listfile: /standard/mlia/MLIA_Team14/SelfMedMAE/val_list.txt
 
 # output
-output_dir: /home/njt4xc/outputs/${run_name}
+output_dir: /standard/mlia/MLIA_Team14/outputs/${run_name}
 ckpt_dir: ${output_dir}/ckpts
 
 # data preprocessing

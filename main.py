@@ -6,14 +6,13 @@ import torch.multiprocessing as mp
 # torch.multiprocessing.set_sharing_strategy('file_system')
 import wandb
 
-# Disable cuDNN auto-tuning to avoid internal errors with unusual tensor shapes
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
-# Memory optimizations
+
 if torch.cuda.is_available():
-    torch.cuda.empty_cache()  # Clear cache at start
-    # Set memory fraction to prevent OOM
+    torch.cuda.empty_cache() 
+
     torch.cuda.set_per_process_memory_fraction(0.9)
 
 import sys
@@ -29,7 +28,7 @@ def main():
 
     args.test = False
 
-    # set seed if required
+
     set_seed(args.seed)
 
     if not args.multiprocessing_distributed and args.gpu is not None:
@@ -74,11 +73,11 @@ def main_worker(gpu, args):
                         resume='allow',
                         dir=args.output_dir)
 
-    # create model
+
     trainer.build_model()
-    # create optimizer
+   
     trainer.build_optimizer()
-    # resume training
+
     if args.resume and args.resume.strip():
         print(f"=> Resume flag is set: {args.resume}")
         trainer.resume()

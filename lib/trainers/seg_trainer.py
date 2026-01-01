@@ -1,3 +1,7 @@
+# Support a true 2D segmentation pipeline where models operate on single slices rather than full volumes.
+# Some datasets still return 5D tensors [B, C, H, W, D], so for 2D training we extract a representative slice
+# to match the 2D decoder output shape and avoid shape or loss mismatches.
+
 import os
 import math
 import time
@@ -23,7 +27,7 @@ from utils import SmoothedValue, concat_all_gather, LayerDecayValueAssigner
 
 import wandb
 
-from lib.data.med_transforms import get_scratch_train_transforms, get_val_transforms, get_post_transforms, get_vis_transforms, get_raw_transforms
+from lib.data.med_transforms import get_scratch_train_transforms, get_val_transforms, get_post_transforms, get_vis_transforms, get_raw_transforms, get_true_2d_train_transforms, get_true_2d_val_transforms
 from lib.data.med_datasets import get_msd_trainset, get_train_loader, get_val_loader, idx2label_all, btcv_8cls_idx
 from lib.tools.visualization import patches3d_to_grid, images3d_to_grid
 from .base_trainer import BaseTrainer
@@ -126,24 +130,35 @@ class SegTrainer(BaseTrainer):
                     state_dict = checkpoint
                 # import pdb
                 # pdb.set_trace()
-                if self.model_name == 'UNETR3D':
+                if self.model_name == 'UNETR2D':
                     for key in list(state_dict.keys()):
                         if key.startswith('encoder.'):
                             state_dict[key[len('encoder.'):]] = state_dict[key]
                             del state_dict[key]
-                        # need to concat and load pos embed. too
-                        # TODO: unify the learning of pos embed of pretraining and finetuning
                         if key == 'encoder_pos_embed':
                             pe = torch.zeros([1, 1, state_dict[key].size(-1)])
                             state_dict['pos_embed'] = torch.cat([pe, state_dict[key]], dim=1)
                             del state_dict[key]
-                    # Convert 2D Conv2d weights to 3D Conv3d weights if needed
-                    # Check patch_embed.proj.weight (may be Conv2d from 2D MAE or Conv3d in UNETR)
+                    if 'pos_embed' in state_dict:
+                        checkpoint_shape = state_dict['pos_embed'].shape
+                        model_shape = self.model.encoder.pos_embed.shape
+                        if checkpoint_shape != model_shape:
+                            print(f"=> Skipping pos_embed: checkpoint shape {checkpoint_shape} != model shape {model_shape}")
+                            del state_dict['pos_embed']
+                    msg = self.model.encoder.load_state_dict(state_dict, strict=False)
+                elif self.model_name == 'UNETR3D':
+                    for key in list(state_dict.keys()):
+                        if key.startswith('encoder.'):
+                            state_dict[key[len('encoder.'):]] = state_dict[key]
+                            del state_dict[key]
+                        if key == 'encoder_pos_embed':
+                            pe = torch.zeros([1, 1, state_dict[key].size(-1)])
+                            state_dict['pos_embed'] = torch.cat([pe, state_dict[key]], dim=1)
+                            del state_dict[key]
                     if 'patch_embed.proj.weight' in state_dict:
                         checkpoint_shape = state_dict['patch_embed.proj.weight'].shape
                         model_shape = self.model.encoder.patch_embed.proj.weight.shape
                         if checkpoint_shape != model_shape:
-                            # Try to convert 2D Conv2d to 3D Conv3d: [C_out, C_in, H, W] -> [C_out, C_in, H, W, 1]
                             if len(checkpoint_shape) == 4 and len(model_shape) == 5:
                                 if (checkpoint_shape[0] == model_shape[0] and 
                                     checkpoint_shape[1] == model_shape[1] and
@@ -152,9 +167,6 @@ class SegTrainer(BaseTrainer):
                                     model_shape[4] == 1):
                                     print(f"=> Converting 2D Conv2d weights to 3D Conv3d: {checkpoint_shape} -> {model_shape}")
                                     state_dict['patch_embed.proj.weight'] = state_dict['patch_embed.proj.weight'].unsqueeze(-1)
-                                    if 'patch_embed.proj.bias' in state_dict:
-                                        # Bias doesn't need conversion, it's 1D
-                                        pass
                                 else:
                                     print(f"=> Skipping patch_embed.proj.weight: cannot convert {checkpoint_shape} to {model_shape}")
                                     del state_dict['patch_embed.proj.weight']
@@ -165,7 +177,6 @@ class SegTrainer(BaseTrainer):
                                 del state_dict['patch_embed.proj.weight']
                                 if 'patch_embed.proj.bias' in state_dict:
                                     del state_dict['patch_embed.proj.bias']
-                    # Check pos_embed (may have different number of patches)
                     if 'pos_embed' in state_dict:
                         checkpoint_shape = state_dict['pos_embed'].shape
                         model_shape = self.model.encoder.pos_embed.shape
@@ -219,9 +230,12 @@ class SegTrainer(BaseTrainer):
             args = self.args
 
             if args.dataset in ['btcv', 'msd_brats']:
-                # build train dataloader
+                use_true_2d = getattr(args, 'use_true_2d', False)
                 if not args.test:
-                    train_transform = get_scratch_train_transforms(args)
+                    if use_true_2d:
+                        train_transform = get_true_2d_train_transforms(args)
+                    else:
+                        train_transform = get_scratch_train_transforms(args)
                     self.dataloader = get_train_loader(args, 
                                                     batch_size=self.batch_size, 
                                                     workers=self.workers, 
@@ -230,14 +244,18 @@ class SegTrainer(BaseTrainer):
                     print(f"==> Length of train dataloader is {self.iters_per_epoch}")
                 else:
                     self.dataloader = None
-                # build val dataloader
-                val_transform = get_val_transforms(args)
+                if use_true_2d:
+                    val_transform = get_true_2d_val_transforms(args)
+                else:
+                    val_transform = get_val_transforms(args)
                 self.val_dataloader = get_val_loader(args, 
-                                                     batch_size=args.val_batch_size, # batch per gpu
+                                                     batch_size=args.val_batch_size,
                                                      workers=self.workers, 
                                                      val_transform=val_transform)
-                # build vis dataloader
-                vis_transform = get_vis_transforms(args)
+                if use_true_2d:
+                    vis_transform = get_true_2d_val_transforms(args)
+                else:
+                    vis_transform = get_vis_transforms(args)
                 self.vis_dataloader = get_val_loader(args,
                                                     batch_size=args.vis_batch_size,
                                                     workers=self.workers,

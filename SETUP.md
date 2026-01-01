@@ -1,221 +1,285 @@
-# Setup Guide for SelfMedMAE
+# 2D Medical Image Segmentation Setup Guide
 
-This guide will walk you through setting up the SelfMedMAE repository for medical image analysis using Masked Autoencoders (MAE).
+This guide provides instructions for two scenarios:
 
-## Prerequisites
+- **Option A**: Using the existing shared environment at `/standard/mlia/MLIA_Team14/SelfMedMAE`
+- **Option B**: Setting up a fresh personal environment
 
-- **Python**: 3.8+ (The README shows PyTorch 1.7.1 built for Python 3.8 based on the package version strings `py3.8`/`py38`, but newer Python versions should work with newer PyTorch versions)
-- **CUDA**: 10.1+ (for GPU support)
-- **Git**: To clone/download the repository
+---
 
-## Step 1: Create a Python Environment
+## Option A: Using Existing Shared Environment
 
-It's recommended to use a virtual environment or conda environment:
+If you have access to the shared environment at `/standard/mlia/MLIA_Team14/SelfMedMAE`:
 
-### Option A: Using Conda (Recommended)
-
-```bash
-# Create a new conda environment
-# Note: The original package versions specify Python 3.8, but you can use Python 3.8-3.11
-conda create -n selfmedmae python=3.8  # or python=3.9, python=3.10, python=3.11
-conda activate selfmedmae
-```
-
-### Option B: Using venv
+### Step 1: SSH to Rivanna
 
 ```bash
-# Create a virtual environment
-python3 -m venv venv  # or python3.8, python3.9, etc.
-source venv/bin/activate  # On macOS/Linux
-# or
-venv\Scripts\activate  # On Windows
+ssh user@login.hpc.virginia.edu
+
 ```
 
-## Step 2: Install PyTorch
-
-Install PyTorch with CUDA support (matching the versions in README):
+### Step 2: Setup Python Environment
 
 ```bash
-# For CUDA 10.1 (as specified in README)
-conda install pytorch=1.7.1 torchvision=0.8.2 cudatoolkit=10.1 -c pytorch
-
-# OR if you have a newer CUDA version, install compatible PyTorch:
-# For CUDA 11.x:
-conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch
-# For CUDA 11.8+:
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+python3 -m venv venv_selfmedmae
+source venv_selfmedmae/bin/activate
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install monai timm wandb SimpleITK omegaconf scikit-learn numpy tqdm
+pip install -r requirements.txt
 ```
 
-## Step 3: Install Required Packages
-
-Install the core dependencies:
+### Step 3: Request GPU Node
 
 ```bash
-# Install MONAI (weekly development version as specified)
-pip install monai-weekly==0.9.dev2152
-
-# Install other required packages
-pip install nibabel==3.2.1
-pip install omegaconf==2.1.1
-pip install timm==0.4.12
-pip install wandb  # For logging and visualizations
-pip install scikit-learn  # For sklearn.metrics
-pip install numpy
-pip install tqdm  # For progress bars
+export USER=njt4xc
+salloc --partition=gpu-mig \
+       --gres=gpu:1g.10gb:1 \
+       --time=48:00:00 \
+       --mem=32G \
+       --cpus-per-task=4
 ```
 
-**Note**: If `monai-weekly==0.9.dev2152` is not available, try:
+Once allocated, connect to the compute node:
 
 ```bash
-pip install monai
+srun --cpu-bind=none --pty bash
 ```
 
-## Step 4: Verify Installation
+### Step 4: Prepare Data
 
-Test that PyTorch can access your GPU:
-
-```python
-python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda if torch.cuda.is_available() else \"N/A\"}')"
+```bash
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+source venv_selfmedmae/bin/activate
+python create_list_files.py /standard/mlia/MLIA_Team14/SelfMedMAE
 ```
 
-## Step 5: Download Medical Imaging Datasets
+This creates `train_list.txt` and `val_list.txt` for MAE pre-training.
 
-The project requires medical imaging datasets. Download and prepare:
+### Step 5: MAE Pre-training (2D)
 
-### For 3D Medical Image Segmentation:
+```bash
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python main.py configs/mae2d_btcv_1gpu.yaml
+```
 
-1. **BTCV Dataset** (for abdominal organ segmentation):
+**Output:** Checkpoints saved to `/standard/mlia/MLIA_Team14/outputs/mae2d_vit_base_btcv/ckpts/`
 
-   - Register and download from: https://www.synapse.org/#!Synapse:syn3193805/wiki/217752
-   - Extract the dataset to a directory (e.g., `/path/to/BTCV`)
+### Step 6: UNETR Fine-tuning (With Pre-training)
 
-2. **MSD_BraTS Dataset** (for brain tumor segmentation):
-   - Download from: http://medicaldecathlon.com/
-   - Extract the dataset to a directory (e.g., `/path/to/MSD_BraTS`)
+```bash
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python main.py configs/unetr2d_btcv_true2d.yaml
+```
 
-### For 2D Medical Image Classification:
+**Note:** Uses pre-trained weights from `checkpoint_0799.pth.tar` (or latest available). The config file already points to `/standard/mlia/MLIA_Team14/outputs/mae2d_vit_base_btcv/ckpts/checkpoint_0799.pth.tar` If needed please change the file path of the checkpoint in that file if the weight is located in a different folder.
 
-- **CXR14** (Chest X-ray dataset)
-- **ImageNet-100** (subset of ImageNet)
+### Step 7: UNETR Baseline (Without Pre-training)
 
-## Step 6: Update Configuration Files
+```bash
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python main.py configs/unetr2d_btcv_true2d_scratch.yaml
+```
 
-Update the configuration files in the `configs/` directory with your data paths:
+**Output:** Checkpoints saved to `/standard/mlia/MLIA_Team14/outputs/UNETR2D_vit_base_btcv_scratch/ckpts/`
 
-### For BTCV (3D):
+### Step 8: Segmentation Inference
 
-Edit `configs/mae3d_btcv_1gpu.yaml`:
+#### With Pre-trained UNETR
+
+```bash
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python run_segmentation_true2d.py \
+  --checkpoint /standard/mlia/MLIA_Team14/outputs/UNETR2D_vit_base_btcv/ckpts/checkpoint_0199.pth.tar \
+  --data_path /standard/mlia/MLIA_Team14/SelfMedMAE/Segmentation_data\ 2 \
+  --output_dir /standard/mlia/MLIA_Team14/segmentation_results_unetr2d_pretrained \
+  --num_classes 14 \
+  --gpu 0 \
+  --save_predictions
+```
+
+**Note:** Update `checkpoint_0199.pth.tar` to the actual checkpoint you want to use (e.g., `checkpoint_0499.pth.tar`, `checkpoint_0799.pth.tar`, etc., along wiht change the file path as needed )
+
+#### Baseline UNETR (Scratch)
+
+```bash
+cd /standard/mlia/MLIA_Team14/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python run_segmentation_true2d.py \
+  --checkpoint /standard/mlia/MLIA_Team14/outputs/UNETR2D_vit_base_btcv_scratch/ckpts/checkpoint_0199.pth.tar \
+  --data_path /standard/mlia/MLIA_Team14/SelfMedMAE/Segmentation_data\ 2 \
+  --output_dir /standard/mlia/MLIA_Team14/segmentation_results_unetr2d_scratch \
+  --num_classes 14 \
+  --gpu 0 \
+  --save_predictions
+```
+
+**Results:** Saved to `--output_dir` with Dice scores in `results.txt`
+
+---
+
+## Option B: Fresh Personal Environment Setup
+
+If you want to set up your own environment from scratch:
+
+### Step 1: Transfer Code to Rivanna
+
+From your local machine:
+
+```bash
+
+scp -r /path/to/your/local/SelfMedMAE user@login.hpc.virginia.edu:~/SelfMedMAE
+```
+
+### Step 2: Transfer Data to Rivanna
+
+From your local machine:
+
+```bash
+#
+scp -r /path/to/your/Segmentation_data\ 2 user@login.hpc.virginia.edu:~/SelfMedMAE/
+```
+
+### Step 3: SSH and Setup Environment
+
+```bash
+ssh user@login.hpc.virginia.edu
+cd ~/SelfMedMAE
+python3 -m venv venv_selfmedmae
+source venv_selfmedmae/bin/activate
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install monai timm wandb SimpleITK omegaconf scikit-learn numpy tqdm
+pip install -r requirements.txt
+```
+
+### Step 4: Update Config Files
+
+Update the following config files to use your paths:
+
+**`configs/mae2d_btcv_1gpu.yaml`:**
 
 ```yaml
-data_path: /path/to/your/BTCV # Update this path
-output_dir: /path/to/your/output/${run_name} # Update this path
+data_path: ~/SelfMedMAE
+tr_listfile: ~/SelfMedMAE/train_list.txt
+va_listfile: ~/SelfMedMAE/val_list.txt
+output_dir: ~/outputs/${run_name}
 ```
 
-### For MSD_BraTS (3D):
-
-Edit `configs/mae3d_msdbrats_1gpu.yaml`:
+**`configs/unetr2d_btcv_true2d.yaml`:**
 
 ```yaml
-data_path: /path/to/your/MSD_BraTS # Update this path
-output_dir: /path/to/your/output/${run_name} # Update this path
+data_path: ~/SelfMedMAE
+output_dir: ~/outputs/${run_name}
+pretrain: ~/outputs/mae2d_vit_base_btcv/ckpts/checkpoint_0799.pth.tar
 ```
 
-### For 2D datasets:
+**`configs/unetr2d_btcv_true2d_scratch.yaml`:**
 
-Update `configs/mae_cxr14.yaml` and `configs/mae_im100.yaml` similarly.
-
-## Step 7: Prepare Dataset JSON Files
-
-The project uses JSON files to specify dataset splits. For BTCV, it references `transunet.json`. You may need to:
-
-1. Create a JSON file listing your training/validation data
-2. Update the `json_list` parameter in the config files
-3. The JSON format should match MONAI's expected format (see MONAI documentation)
-
-Example structure:
-
-```json
-{
-  "training": [
-    {"image": "path/to/image1.nii.gz", "label": "path/to/label1.nii.gz"},
-    ...
-  ],
-  "validation": [...]
-}
+```yaml
+data_path: ~/SelfMedMAE
+output_dir: ~/outputs/${run_name}
 ```
 
-## Step 8: Set Up Wandb (Optional but Recommended)
-
-1. Create a Wandb account at https://wandb.ai
-2. Login from command line:
-   ```bash
-   wandb login
-   ```
-3. Or disable Wandb by setting `disable_wandb: true` in config files
-
-## Step 9: Test the Setup
-
-Run a quick test to verify everything works:
+### Step 5: Request GPU Node
 
 ```bash
-# Test import
-python -c "import torch; import monai; import timm; import wandb; print('All imports successful!')"
+salloc --partition=gpu-mig \
+       --gres=gpu:1g.10gb:1 \
+       --time=48:00:00 \
+       --mem=32G \
+       --cpus-per-task=4
 ```
 
-## Step 10: Run Training (Example)
-
-Once everything is set up, you can start training:
-
-### Stage 1: MAE Pre-training
+Once allocated, connect to the compute node:
 
 ```bash
-python main.py \
-    configs/mae3d_btcv_1gpu.yaml \
-    --mask_ratio=0.125 \
-    --run_name='mae3d_sincos_vit_base_btcv_mr125'
+srun --cpu-bind=none --pty bash
 ```
 
-### Stage 2: UNETR Fine-tuning (after pre-training)
+### Step 6: Prepare Data
 
 ```bash
-python main.py \
-    configs/unetr_btcv_1gpu.yaml \
-    --lr=3.44e-2 \
-    --batch_size=6 \
-    --run_name=unetr3d_vit_base_btcv_lr3.44e-2_mr125_10ke_pretrain_5000e \
-    --pretrain=/path/to/your/pretrained/checkpoint.pth.tar
+cd ~/SelfMedMAE
+source venv_selfmedmae/bin/activate
+python create_list_files.py ~/SelfMedMAE
 ```
 
-## Troubleshooting
+This creates `train_list.txt` and `val_list.txt` for MAE pre-training.
 
-### Common Issues:
-
-1. **CUDA out of memory**: Reduce `batch_size` in config files
-2. **MONAI version issues**: Try installing the latest stable MONAI: `pip install monai`
-3. **Import errors**: Make sure you're in the repository root directory and `lib/` is in Python path
-4. **Dataset path errors**: Verify all paths in config files are correct and accessible
-5. **Wandb errors**: If Wandb fails, you can disable it with `--disable_wandb` flag
-
-### GPU Selection:
-
-To use a specific GPU, set `CUDA_VISIBLE_DEVICES`:
+### Step 7: MAE Pre-training (2D)
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python main.py configs/mae3d_btcv_1gpu.yaml ...
+cd ~/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python main.py configs/mae2d_btcv_1gpu.yaml
 ```
 
-Or modify the `gpu: 0` parameter in the config files.
+**Output:** Checkpoints saved to `~/outputs/mae2d_vit_base_btcv/ckpts/`
 
-## Additional Notes
+### Step 8: UNETR Fine-tuning (With Pre-training)
 
-- The project uses distributed training support (can be configured in YAML files)
-- Checkpoint files will be saved in `{output_dir}/ckpts/`
-- Wandb logs and visualizations will be stored in `{output_dir}/wandb/`
-- Adjust `workers` parameter in config files based on your system's CPU cores
+```bash
+cd ~/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python main.py configs/unetr2d_btcv_true2d.yaml
+```
 
-## Next Steps
+**Note:** Make sure the `pretrain:` path in the config file points to your MAE checkpoint.
 
-1. Review the configuration files in `configs/` to understand all available options
-2. Check the scripts in `scripts/` directory for example run commands
-3. Modify hyperparameters in config files as needed for your use case
-4. Monitor training progress via Wandb dashboard
+### Step 9: UNETR Baseline (Without Pre-training)
+
+```bash
+cd ~/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python main.py configs/unetr2d_btcv_true2d_scratch.yaml
+```
+
+**Output:** Checkpoints saved to `~/outputs/UNETR2D_vit_base_btcv_scratch/ckpts/`
+
+### Step 10: Segmentation Inference
+
+#### With Pre-trained UNETR
+
+```bash
+cd ~/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python run_segmentation_true2d.py \
+  --checkpoint ~/outputs/UNETR2D_vit_base_btcv/ckpts/checkpoint_XXXX.pth.tar \
+  --data_path ~/SelfMedMAE/Segmentation_data\ 2 \
+  --output_dir ~/segmentation_results_unetr2d_pretrained \
+  --num_classes 14 \
+  --gpu 0 \
+  --save_predictions
+```
+
+**Note:** Replace `checkpoint_XXXX.pth.tar` with your actual checkpoint filename (e.g., `checkpoint_0199.pth.tar`, `checkpoint_0499.pth.tar`, etc.)
+
+#### Baseline UNETR (Scratch)
+
+```bash
+cd ~/SelfMedMAE
+source venv_selfmedmae/bin/activate
+module load cuda
+python run_segmentation_true2d.py \
+  --checkpoint ~/outputs/UNETR2D_vit_base_btcv_scratch/ckpts/checkpoint_XXXX.pth.tar \
+  --data_path ~/SelfMedMAE/Segmentation_data\ 2 \
+  --output_dir ~/segmentation_results_unetr2d_scratch \
+  --num_classes 14 \
+  --gpu 0 \
+  --save_predictions
+```
+
+**Results:** Saved to `--output_dir` with Dice scores in `results.txt`

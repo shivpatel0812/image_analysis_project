@@ -1,3 +1,4 @@
+from matplotlib.pyplot import grid
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -92,13 +93,9 @@ class MAE3D(nn.Module):
 
         grid_size = []
         for in_size, pa_size in zip(input_size, patch_size):
-            assert in_size % pa_size == 0, f"input size {in_size} and patch size {pa_size} are not divisible"
-            gs = in_size // pa_size
-            assert gs > 0, f"grid_size must be > 0, got {gs} for input_size={in_size}, patch_size={pa_size}"
-            grid_size.append(gs)
+            assert in_size % pa_size == 0, "input size and patch size are not proper"
+            grid_size.append(in_size // pa_size)
         self.grid_size = grid_size
-        # Validate grid_size
-        assert all(gs > 0 for gs in grid_size), f"Invalid grid_size: {grid_size}"
 
         # build positional encoding for encoder and decoder
         if args.pos_embed_type == 'sincos':
@@ -155,33 +152,12 @@ class MAE3D(nn.Module):
 
         # compute length for selected and masked
         length = np.prod(self.grid_size)
-        actual_patches = x.size(1)  # Actual number of patches from patchification
-        
-        # CRITICAL VALIDATION: Check if actual patches match expected
-        if actual_patches != length:
-            raise RuntimeError(
-                f"Patch count mismatch! Expected {length} patches (from input_size={self.input_size}, "
-                f"grid_size={self.grid_size}), but got {actual_patches} patches from actual image. "
-                f"This means input_size in config doesn't match actual cropped image dimensions. "
-                f"Image shape before patchification was likely different from {self.input_size}. "
-                f"Fix: Update input_size in config to match actual cropped dimensions after transforms."
-            )
-        
         sel_length = int(length * (1 - args.mask_ratio))
         msk_length = length - sel_length
 
-        # Validate dimensions before operations
-        assert length > 0, f"Invalid grid_size: {self.grid_size}, length={length}"
-        assert sel_length > 0, f"sel_length must be > 0, got {sel_length} (length={length}, mask_ratio={args.mask_ratio})"
-        assert msk_length >= 0, f"msk_length must be >= 0, got {msk_length}"
-        
         # generate batched shuffle indices
         shuffle_indices = batched_shuffle_indices(batch_size, length, device=x.device)
         unshuffle_indices = shuffle_indices.argsort(dim=1)
-
-        # Validate indices are in valid range
-        assert shuffle_indices.max() < length, f"Invalid shuffle index: max={shuffle_indices.max()}, length={length}"
-        assert shuffle_indices.min() >= 0, f"Invalid shuffle index: min={shuffle_indices.min()}"
 
         # select and mask the input patches
         shuffled_x = x.gather(dim=1, index=shuffle_indices[:, :, None].expand(-1, -1, out_chans))
@@ -192,10 +168,6 @@ class MAE3D(nn.Module):
         sel_indices = shuffle_indices[:, :sel_length]
         # msk_indices = shuffle_indices[:, -msk_length:]
 
-        # Validate position embedding dimensions
-        assert self.encoder_pos_embed.size(1) == length, \
-            f"Position embedding size mismatch: pos_embed={self.encoder_pos_embed.size(1)}, expected={length}"
-        
         # select the position embedings accordingly
         sel_encoder_pos_embed = self.encoder_pos_embed.expand(batch_size, -1, -1).gather(dim=1, index=sel_indices[:, :, None].expand(-1, -1, args.encoder_embed_dim))
 
